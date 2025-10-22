@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Optional, Dict, Any
 from datetime import datetime
 import logging
+from models import FileLog
 
 # Configurar logging
 logging.basicConfig(
@@ -190,8 +191,6 @@ class FileOrganizer:
             result: Resultado de la operación
         """
         try:
-            from models import FileLog
-            
             log_entry = FileLog(
                 filename=result['filename'],
                 original_path=result['original_path'],

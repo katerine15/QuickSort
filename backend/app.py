@@ -62,13 +62,20 @@ def init_tree():
     
     # Cargar nodos desde la base de datos
     with app.app_context():
-        nodes = TreeNode.query.all()
+        nodes = TreeNode.query.order_by(TreeNode.id).all()
         for node in nodes:
             # Reconstruir árbol desde BD
-            pass
+            if node.parent_id is None:
+                # Es un nodo raíz, ya está en file_tree.root
+                continue
+            else:
+                # Agregar nodo al árbol
+                parent = TreeNode.query.get(node.parent_id)
+                if parent:
+                    file_tree.add_node(parent.path, node.name, node.path, node.node_type)
     
-    # Inicializar organizador
-    file_organizer = FileOrganizer(file_tree)
+    # Inicializar organizador con sesión de BD
+    file_organizer = FileOrganizer(file_tree, db.session)
     
     # Inicializar monitor
     monitor_config = MonitorConfig.query.first()
@@ -141,6 +148,20 @@ def create_node():
     try:
         data = request.get_json()
         
+        # Validar datos requeridos
+        if not data.get('name'):
+            return jsonify({
+                'success': False,
+                'message': 'El nombre del nodo es requerido'
+            }), 400
+        
+        if not data.get('path'):
+            return jsonify({
+                'success': False,
+                'message': 'La ruta del nodo es requerida'
+            }), 400
+        
+        # Crear el nodo en la base de datos
         new_node = TreeNode(
             name=data['name'],
             path=data['path'],
@@ -151,23 +172,41 @@ def create_node():
         db.session.add(new_node)
         db.session.commit()
         
+        # Crear la carpeta física si no existe
+        try:
+            os.makedirs(data['path'], exist_ok=True)
+            logger.info(f"Carpeta creada: {data['path']}")
+        except Exception as folder_error:
+            logger.warning(f"No se pudo crear la carpeta física: {folder_error}")
+        
         # Actualizar árbol en memoria
         if file_tree and data.get('parent_id'):
             parent = TreeNode.query.get(data['parent_id'])
             if parent:
                 file_tree.add_node(parent.path, data['name'], data['path'], data.get('node_type', 'folder'))
         
+        logger.info(f"Nodo creado: {new_node.name} (ID: {new_node.id})")
+        
         return jsonify({
             'success': True,
-            'node': new_node.to_dict()
+            'node': new_node.to_dict(),
+            'message': 'Nodo creado exitosamente'
         }), 201
     
-    except Exception as e:
-        logger.error(f"Error creando nodo: {e}")
+    except KeyError as e:
+        logger.error(f"Campo faltante: {e}")
         db.session.rollback()
         return jsonify({
             'success': False,
-            'message': str(e)
+            'message': f'Campo requerido faltante: {str(e)}'
+        }), 400
+    
+    except Exception as e:
+        logger.error(f"Error creando nodo: {e}", exc_info=True)
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'message': f'Error interno: {str(e)}'
         }), 500
 
 

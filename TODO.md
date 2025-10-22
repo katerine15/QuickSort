@@ -34,11 +34,15 @@
 - [x] Activar entorno virtual
 - [x] Instalar dependencias (pip install -r requirements.txt)
 - [x] Instalar Flask-SQLAlchemy
+- [x] **CORREGIR ERRORES EN CÓDIGO** ✅
+  - [x] Corregir app.py - función init_tree()
+  - [x] Corregir file_organizer.py - importaciones
+  - [x] Agregar validación en config.py
 - [ ] Inicializar base de datos
 - [ ] Probar ejecución del servidor Flask
 
 ### Frontend
-- [x] Instalar dependencias Node (npm install) - EN PROGRESO
+- [x] Instalar dependencias Node (npm install)
 - [ ] Probar ejecución del servidor React
 - [ ] Verificar conexión con backend
 
@@ -52,5 +56,6 @@
 
 - El proyecto está completamente estructurado
 - Todos los archivos de código están creados
-- Solo falta ejecutar comandos de instalación
-- Errores de Pylint son normales (dependencias no instaladas aún)
+- **✅ ERRORES CRÍTICOS CORREGIDOS**
+- Solo falta inicializar BD y probar ejecución
+- Ver ERRORES_Y_CORRECCIONES.md para detalles
