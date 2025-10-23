@@ -130,7 +130,7 @@ class FileMonitor:
         
         try:
             self.event_handler = FileEventHandler(self.organizer, self.auto_organize)
-            self.observer = Observer()
+            self.observer = Observer(timeout = 1)
             self.observer.schedule(
                 self.event_handler,
                 self.watch_folder,

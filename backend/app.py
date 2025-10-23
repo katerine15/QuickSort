@@ -55,24 +55,48 @@ def init_database():
 def init_tree():
     """Inicializa el árbol de organización"""
     global file_tree, file_organizer, file_monitor
-    
+
     # Crear árbol desde la base de datos
-    root_path = os.path.join(Config.DEFAULT_WATCH_FOLDER, 'Organized')
+    root_path = os.path.join(os.path.expanduser('~'), 'Desktop', 'Organized')
     file_tree = FileOrganizationTree(root_path)
-    
-    # Cargar nodos desde la base de datos
+
+    # Cargar nodos y reglas desde la base de datos
     with app.app_context():
         nodes = TreeNode.query.order_by(TreeNode.id).all()
+        rules = OrganizationRule.query.all()
+
+        # Crear un diccionario para mapear reglas por node_id
+        rules_by_node = {}
+        for rule in rules:
+            if rule.node_id not in rules_by_node:
+                rules_by_node[rule.node_id] = []
+            rules_by_node[rule.node_id].append(rule)
+
         for node in nodes:
             # Reconstruir árbol desde BD
             if node.parent_id is None:
-                # Es un nodo raíz, ya está en file_tree.root
+                # Es un nodo raíz, cargar sus reglas
+                if node.id in rules_by_node:
+                    for rule in rules_by_node[node.id]:
+                        file_tree.root.add_rule(
+                            rule_type=rule.rule_type,
+                            pattern=rule.pattern,
+                            priority=rule.priority
+                        )
                 continue
             else:
                 # Agregar nodo al árbol
                 parent = TreeNode.query.get(node.parent_id)
                 if parent:
-                    file_tree.add_node(parent.path, node.name, node.path, node.node_type)
+                    new_node = file_tree.add_node(parent.path, node.name, node.path, node.node_type)
+                    # Cargar reglas para este nodo
+                    if node.id in rules_by_node:
+                        for rule in rules_by_node[node.id]:
+                            new_node.add_rule(
+                                rule_type=rule.rule_type,
+                                pattern=rule.pattern,
+                                priority=rule.priority
+                            )
     
     # Inicializar organizador con sesión de BD
     file_organizer = FileOrganizer(file_tree, db.session)
@@ -743,4 +767,4 @@ if __name__ == '__main__':
         init_database()
         init_tree()
     
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    app.run(debug=False, host='0.0.0.0', port=5000)

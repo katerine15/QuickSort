@@ -48,12 +48,20 @@ const FileMonitor = () => {
   const [organizing, setOrganizing] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
+  const [newWatchFolder, setNewWatchFolder] = useState('');
 
   useEffect(() => {
     loadMonitorData();
     const interval = setInterval(loadMonitorData, 3000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (config) {
+      setNewWatchFolder(config.watch_folder);
+      console.log(config);
+    }
+  }, [config?.id]);
 
   const loadMonitorData = async () => {
     try {
@@ -166,6 +174,14 @@ const FileMonitor = () => {
     }
   };
 
+  const handleConfirmWatchFolder = async () => {
+    if (newWatchFolder.trim() === '') {
+      setError('La ruta de la carpeta no puede estar vacía');
+      return;
+    }
+    await handleUpdateConfig('watch_folder', newWatchFolder);
+  };
+
   if (loading) {
     return (
       <Paper sx={{ p: 3 }}>
@@ -254,17 +270,26 @@ const FileMonitor = () => {
               Configuración
             </Typography>
 
-            <TextField
-              fullWidth
-              label="Carpeta a Monitorear"
-              value={config.watch_folder}
-              onChange={(e) => handleUpdateConfig('watch_folder', e.target.value)}
-              margin="normal"
-              InputProps={{
-                startAdornment: <Folder sx={{ mr: 1, color: 'action.active' }} />,
-              }}
-              helperText="Ruta de la carpeta que será monitoreada"
-            />
+            <Box sx={{ display: 'flex', alignItems: 'flex-start', gap: 1, mb: 2 }}>
+              <TextField
+                fullWidth
+                label="Carpeta a Monitorear"
+                value={newWatchFolder}
+                onChange={(e) => setNewWatchFolder(e.target.value)}
+                margin="normal"
+                InputProps={{
+                  startAdornment: <Folder sx={{ mr: 1, color: 'action.active' }} />,
+                }}
+                helperText="Ruta de la carpeta que será monitoreada"
+              />
+              <Button
+                variant="contained"
+                onClick={handleConfirmWatchFolder}
+                sx={{ mt: 2 }}
+              >
+                Confirmar
+              </Button>
+            </Box>
 
             <Box sx={{ mt: 2 }}>
               <FormControlLabel

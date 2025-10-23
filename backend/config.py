@@ -15,11 +15,8 @@ class Config:
     SQLALCHEMY_DATABASE_URI = f'sqlite:///{DATABASE_PATH}'
     SQLALCHEMY_TRACK_MODIFICATIONS = False
     
-    # Configuración de monitoreo
-    DEFAULT_WATCH_FOLDER = os.path.join(os.path.expanduser('~'), 'Downloads')
-    # Validar que la carpeta existe, si no usar el home
-    if not os.path.exists(DEFAULT_WATCH_FOLDER):
-        DEFAULT_WATCH_FOLDER = os.path.expanduser('~')
+# Configuración de monitoreo
+    DEFAULT_WATCH_FOLDER = os.path.expanduser('~')
     
     MONITOR_INTERVAL = 1  # segundos
     
