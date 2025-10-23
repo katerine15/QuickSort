@@ -80,6 +80,16 @@ export const updateMonitorConfig = async (configData) => {
   return response.data;
 };
 
+export const getMonitorFiles = async () => {
+  const response = await api.get('/monitor/files');
+  return response.data;
+};
+
+export const organizeAllFiles = async () => {
+  const response = await api.post('/monitor/organize-all');
+  return response.data;
+};
+
 // ==================== ORGANIZACIÓN ====================
 
 export const organizeFile = async (filePath) => {

@@ -86,6 +86,17 @@ def init_tree():
             auto_organize=monitor_config.auto_organize,
             recursive=monitor_config.recursive
         )
+        
+        # Auto-iniciar el monitor si estaba activo
+        if monitor_config.is_active:
+            logger.info("Monitor estaba activo, reiniciando automáticamente...")
+            if file_monitor.start():
+                logger.info("Monitor reiniciado exitosamente")
+            else:
+                logger.error("Error al reiniciar el monitor")
+                # Actualizar estado en BD si falla
+                monitor_config.is_active = False
+                db.session.commit()
     
     logger.info("Árbol de organización inicializado")
 
@@ -476,6 +487,7 @@ def update_monitor_config():
             }), 404
         
         data = request.get_json()
+        was_running = file_monitor.is_running if file_monitor else False
         
         if 'watch_folder' in data:
             config.watch_folder = data['watch_folder']
@@ -489,6 +501,13 @@ def update_monitor_config():
         
         if 'recursive' in data:
             config.recursive = data['recursive']
+            if file_monitor:
+                # Si el monitor está corriendo y cambia recursive, reiniciar
+                if was_running:
+                    file_monitor.stop()
+                file_monitor.recursive = data['recursive']
+                if was_running:
+                    file_monitor.start()
         
         db.session.commit()
         
@@ -500,6 +519,82 @@ def update_monitor_config():
     except Exception as e:
         logger.error(f"Error actualizando configuración: {e}")
         db.session.rollback()
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/monitor/files', methods=['GET'])
+def get_monitor_files():
+    """Obtiene la lista de archivos en la carpeta monitoreada"""
+    try:
+        if not file_monitor:
+            return jsonify({
+                'success': False,
+                'message': 'Monitor no inicializado'
+            }), 500
+        
+        files = file_monitor.scan_existing_files()
+        
+        # Obtener información adicional de cada archivo
+        files_info = []
+        for file_path in files:
+            try:
+                filename = os.path.basename(file_path)
+                file_extension = os.path.splitext(filename)[1]
+                file_size = os.path.getsize(file_path)
+                
+                # Buscar destino según reglas
+                destination_node = file_tree.find_destination_for_file(filename, file_extension)
+                
+                files_info.append({
+                    'path': file_path,
+                    'filename': filename,
+                    'extension': file_extension,
+                    'size': file_size,
+                    'destination': destination_node.path if destination_node else None,
+                    'destination_name': destination_node.name if destination_node else None,
+                    'has_rule': destination_node is not None
+                })
+            except Exception as e:
+                logger.error(f"Error procesando archivo {file_path}: {e}")
+        
+        return jsonify({
+            'success': True,
+            'files': files_info,
+            'total': len(files_info),
+            'with_rules': sum(1 for f in files_info if f['has_rule']),
+            'without_rules': sum(1 for f in files_info if not f['has_rule'])
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error obteniendo archivos del monitor: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/monitor/organize-all', methods=['POST'])
+def organize_all_files():
+    """Organiza todos los archivos existentes en la carpeta monitoreada"""
+    try:
+        if not file_monitor:
+            return jsonify({
+                'success': False,
+                'message': 'Monitor no inicializado'
+            }), 500
+        
+        result = file_monitor.organize_existing_files()
+        
+        return jsonify({
+            'success': True,
+            'result': result
+        }), 200
+    
+    except Exception as e:
+        logger.error(f"Error organizando archivos: {e}")
         return jsonify({
             'success': False,
             'message': str(e)

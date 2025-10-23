@@ -10,12 +10,23 @@ import {
   Alert,
   Chip,
   Grid,
+  Table,
+  TableBody,
+  TableCell,
+  TableContainer,
+  TableHead,
+  TableRow,
+  CircularProgress,
+  Divider,
 } from '@mui/material';
 import {
   PlayArrow,
   Stop,
   Folder,
   Refresh,
+  FolderOpen,
+  CheckCircle,
+  Warning,
 } from '@mui/icons-material';
 import {
   getMonitorStatus,
@@ -23,12 +34,18 @@ import {
   stopMonitor,
   getMonitorConfig,
   updateMonitorConfig,
+  getMonitorFiles,
+  organizeAllFiles,
 } from '../services/api';
 
 const FileMonitor = () => {
   const [status, setStatus] = useState(null);
   const [config, setConfig] = useState(null);
+  const [files, setFiles] = useState([]);
+  const [filesStats, setFilesStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [loadingFiles, setLoadingFiles] = useState(false);
+  const [organizing, setOrganizing] = useState(false);
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
 
@@ -59,6 +76,54 @@ const FileMonitor = () => {
     } finally {
       setLoading(false);
     }
+  };
+
+  const loadFiles = async () => {
+    try {
+      setLoadingFiles(true);
+      const response = await getMonitorFiles();
+      
+      if (response.success) {
+        setFiles(response.files);
+        setFilesStats({
+          total: response.total,
+          with_rules: response.with_rules,
+          without_rules: response.without_rules,
+        });
+      }
+    } catch (err) {
+      setError('Error cargando archivos: ' + err.message);
+    } finally {
+      setLoadingFiles(false);
+    }
+  };
+
+  const handleOrganizeAll = async () => {
+    if (!window.confirm('¿Deseas organizar todos los archivos según las reglas definidas?')) {
+      return;
+    }
+
+    try {
+      setOrganizing(true);
+      const response = await organizeAllFiles();
+      
+      if (response.success) {
+        setSuccess(`Archivos organizados: ${response.result.stats.files_moved} movidos, ${response.result.stats.files_failed} fallidos`);
+        loadFiles(); // Recargar lista de archivos
+      }
+    } catch (err) {
+      setError('Error organizando archivos: ' + err.message);
+    } finally {
+      setOrganizing(false);
+    }
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
   };
 
   const handleStartMonitor = async () => {
@@ -242,6 +307,138 @@ const FileMonitor = () => {
               </Typography>
             </Box>
           </Box>
+        )}
+      </Paper>
+
+      {/* Sección de Archivos Detectados */}
+      <Paper sx={{ p: 3 }}>
+        <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 2 }}>
+          <Typography variant="h6">
+            Archivos en Carpeta Monitoreada
+          </Typography>
+          <Box>
+            <Button
+              variant="outlined"
+              startIcon={<Refresh />}
+              onClick={loadFiles}
+              disabled={loadingFiles}
+              sx={{ mr: 1 }}
+            >
+              {loadingFiles ? 'Cargando...' : 'Actualizar'}
+            </Button>
+            <Button
+              variant="contained"
+              color="primary"
+              startIcon={organizing ? <CircularProgress size={20} /> : <FolderOpen />}
+              onClick={handleOrganizeAll}
+              disabled={organizing || !files.length || !filesStats?.with_rules}
+            >
+              {organizing ? 'Organizando...' : 'Organizar Todos'}
+            </Button>
+          </Box>
+        </Box>
+
+        {filesStats && (
+          <Grid container spacing={2} sx={{ mb: 2 }}>
+            <Grid item xs={12} md={4}>
+              <Box sx={{ p: 2, bgcolor: 'info.light', borderRadius: 1 }}>
+                <Typography variant="h4" color="info.dark">
+                  {filesStats.total}
+                </Typography>
+                <Typography variant="body2" color="info.dark">
+                  Total de archivos
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Box sx={{ p: 2, bgcolor: 'success.light', borderRadius: 1 }}>
+                <Typography variant="h4" color="success.dark">
+                  {filesStats.with_rules}
+                </Typography>
+                <Typography variant="body2" color="success.dark">
+                  Con reglas definidas
+                </Typography>
+              </Box>
+            </Grid>
+            <Grid item xs={12} md={4}>
+              <Box sx={{ p: 2, bgcolor: 'warning.light', borderRadius: 1 }}>
+                <Typography variant="h4" color="warning.dark">
+                  {filesStats.without_rules}
+                </Typography>
+                <Typography variant="body2" color="warning.dark">
+                  Sin reglas
+                </Typography>
+              </Box>
+            </Grid>
+          </Grid>
+        )}
+
+        <Divider sx={{ my: 2 }} />
+
+        {loadingFiles ? (
+          <Box sx={{ display: 'flex', justifyContent: 'center', p: 3 }}>
+            <CircularProgress />
+          </Box>
+        ) : files.length === 0 ? (
+          <Box sx={{ textAlign: 'center', p: 3 }}>
+            <Typography color="text.secondary">
+              No hay archivos en la carpeta monitoreada.
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+              Haz clic en "Actualizar" para escanear la carpeta.
+            </Typography>
+          </Box>
+        ) : (
+          <TableContainer sx={{ maxHeight: 400 }}>
+            <Table stickyHeader size="small">
+              <TableHead>
+                <TableRow>
+                  <TableCell>Estado</TableCell>
+                  <TableCell>Nombre del Archivo</TableCell>
+                  <TableCell>Extensión</TableCell>
+                  <TableCell>Tamaño</TableCell>
+                  <TableCell>Destino</TableCell>
+                </TableRow>
+              </TableHead>
+              <TableBody>
+                {files.map((file, index) => (
+                  <TableRow key={index} hover>
+                    <TableCell>
+                      {file.has_rule ? (
+                        <CheckCircle color="success" fontSize="small" />
+                      ) : (
+                        <Warning color="warning" fontSize="small" />
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2" noWrap sx={{ maxWidth: 300 }}>
+                        {file.filename}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      <Chip label={file.extension || 'N/A'} size="small" />
+                    </TableCell>
+                    <TableCell>
+                      <Typography variant="body2">
+                        {formatFileSize(file.size)}
+                      </Typography>
+                    </TableCell>
+                    <TableCell>
+                      {file.has_rule ? (
+                        <Typography variant="body2" color="success.main">
+                          {file.destination_name}
+                        </Typography>
+                      ) : (
+                        <Typography variant="body2" color="text.secondary">
+                          Sin regla
+                        </Typography>
+                      )}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </TableContainer>
         )}
       </Paper>
     </Box>

@@ -11,6 +11,7 @@ import {
   DialogActions,
   TextField,
   Alert,
+  FormHelperText,
 } from '@mui/material';
 import {
   FolderOpen,
@@ -19,11 +20,12 @@ import {
   ExpandMore,
   ChevronRight,
 } from '@mui/icons-material';
-import { getTree, getAllNodes, createNode, deleteNode } from '../services/api';
+import { getTree, getAllNodes, createNode, deleteNode, getMonitorConfig } from '../services/api';
 
 const TreeView = () => {
   const [tree, setTree] = useState(null);
   const [nodes, setNodes] = useState([]);
+  const [monitorConfig, setMonitorConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
@@ -37,6 +39,7 @@ const TreeView = () => {
 
   useEffect(() => {
     loadTree();
+    loadMonitorConfig();
   }, []);
 
   const loadTree = async () => {
@@ -60,6 +63,56 @@ const TreeView = () => {
       setError('Error cargando el árbol: ' + err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const loadMonitorConfig = async () => {
+    try {
+      const response = await getMonitorConfig();
+      if (response.success) {
+        setMonitorConfig(response.config);
+      }
+    } catch (err) {
+      console.error('Error cargando configuración del monitor:', err);
+    }
+  };
+
+  const handleOpenDialog = () => {
+    // Auto-completar la ruta basándose en la configuración del monitor
+    if (monitorConfig && monitorConfig.watch_folder) {
+      const basePath = monitorConfig.watch_folder;
+      setNewNodeData({
+        name: '',
+        path: basePath + '/Organized/',
+        parent_id: null,
+        node_type: 'folder',
+      });
+    } else {
+      setNewNodeData({
+        name: '',
+        path: '',
+        parent_id: null,
+        node_type: 'folder',
+      });
+    }
+    setOpenDialog(true);
+  };
+
+  const handleNodeNameChange = (name) => {
+    // Actualizar el path automáticamente cuando cambia el nombre
+    if (monitorConfig && monitorConfig.watch_folder) {
+      const basePath = monitorConfig.watch_folder;
+      const newPath = `${basePath}/Organized/${name}`;
+      setNewNodeData({
+        ...newNodeData,
+        name: name,
+        path: newPath,
+      });
+    } else {
+      setNewNodeData({
+        ...newNodeData,
+        name: name,
+      });
     }
   };
 
@@ -107,6 +160,11 @@ const TreeView = () => {
   const renderTreeNode = (node, level = 0) => {
     const isExpanded = expandedNodes.has(node.id);
     const hasChildren = node.children && node.children.length > 0;
+    
+    // Encontrar información del padre
+    const parentNode = node.parent_id 
+      ? nodes.find(n => n.id === node.parent_id) 
+      : null;
 
     return (
       <Box key={node.id} sx={{ ml: level * 3 }}>
@@ -127,7 +185,21 @@ const TreeView = () => {
           
           <FolderOpen sx={{ mr: 1, color: 'primary.main' }} />
           
-          <Typography sx={{ flexGrow: 1 }}>{node.name}</Typography>
+          <Box sx={{ flexGrow: 1 }}>
+            <Typography component="span" sx={{ fontWeight: 500 }}>
+              {node.name} <Typography component="span" sx={{ color: 'text.secondary', fontSize: '0.9em' }}>(ID: {node.id})</Typography>
+            </Typography>
+            {parentNode && (
+              <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', ml: 0.5 }}>
+                Hijo de: {parentNode.name} (ID: {parentNode.id})
+              </Typography>
+            )}
+            {!parentNode && node.parent_id === null && (
+              <Typography variant="caption" sx={{ display: 'block', color: 'success.main', ml: 0.5 }}>
+                Nodo Raíz
+              </Typography>
+            )}
+          </Box>
           
           <Typography variant="caption" sx={{ mr: 2, color: 'text.secondary' }}>
             {node.rules_count || 0} reglas
@@ -167,7 +239,7 @@ const TreeView = () => {
           <Button
             variant="contained"
             startIcon={<Add />}
-            onClick={() => setOpenDialog(true)}
+            onClick={handleOpenDialog}
           >
             Agregar Nodo
           </Button>
@@ -196,29 +268,105 @@ const TreeView = () => {
         </Box>
       </Paper>
 
+      {/* Lista de todos los nodos de la base de datos */}
+      <Paper sx={{ p: 3 }}>
+        <Typography variant="h6" gutterBottom>
+          Todos los Nodos en la Base de Datos
+        </Typography>
+        
+        {nodes.length > 0 ? (
+          <Box sx={{ mt: 2 }}>
+            {nodes.map((node) => {
+              const parentNode = node.parent_id 
+                ? nodes.find(n => n.id === node.parent_id) 
+                : null;
+              
+              return (
+                <Box
+                  key={node.id}
+                  sx={{
+                    p: 2,
+                    mb: 1,
+                    border: '1px solid',
+                    borderColor: 'divider',
+                    borderRadius: 1,
+                    '&:hover': { bgcolor: 'action.hover' },
+                  }}
+                >
+                  <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
+                    <FolderOpen sx={{ mr: 1, color: 'primary.main' }} />
+                    <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
+                      {node.name} <Typography component="span" sx={{ color: 'text.secondary', fontSize: '0.9em' }}>(ID: {node.id})</Typography>
+                    </Typography>
+                  </Box>
+                  
+                  <Typography variant="body2" color="text.secondary" sx={{ ml: 4 }}>
+                    <strong>Ruta:</strong> {node.path}
+                  </Typography>
+                  
+                  <Typography variant="body2" color="text.secondary" sx={{ ml: 4 }}>
+                    <strong>Tipo:</strong> {node.node_type}
+                  </Typography>
+                  
+                  {parentNode ? (
+                    <Typography variant="body2" sx={{ ml: 4, color: 'info.main' }}>
+                      <strong>Hijo de:</strong> {parentNode.name} (ID: {parentNode.id})
+                    </Typography>
+                  ) : (
+                    <Typography variant="body2" sx={{ ml: 4, color: 'success.main' }}>
+                      <strong>Nodo Raíz</strong>
+                    </Typography>
+                  )}
+                  
+                  <Typography variant="body2" color="text.secondary" sx={{ ml: 4 }}>
+                    <strong>Reglas:</strong> {node.rules_count || 0}
+                  </Typography>
+                </Box>
+              );
+            })}
+          </Box>
+        ) : (
+          <Typography color="text.secondary" sx={{ mt: 2 }}>
+            No hay nodos en la base de datos.
+          </Typography>
+        )}
+      </Paper>
+
       {/* Dialog para crear nodo */}
-      <Dialog open={openDialog} onClose={() => setOpenDialog(false)}>
+      <Dialog open={openDialog} onClose={() => setOpenDialog(false)} maxWidth="sm" fullWidth>
         <DialogTitle>Crear Nuevo Nodo</DialogTitle>
         <DialogContent>
+          <Alert severity="info" sx={{ mt: 2, mb: 2 }}>
+            La ruta se genera automáticamente basándose en la carpeta monitoreada.
+            Solo necesitas ingresar el nombre del nodo (carpeta).
+          </Alert>
+
           <TextField
             fullWidth
-            label="Nombre"
+            label="Nombre del Nodo (Carpeta)"
             value={newNodeData.name}
-            onChange={(e) =>
-              setNewNodeData({ ...newNodeData, name: e.target.value })
-            }
+            onChange={(e) => handleNodeNameChange(e.target.value)}
             margin="normal"
+            autoFocus
+            helperText="Ejemplo: Documentos, Imágenes, Videos, etc."
           />
+
           <TextField
             fullWidth
-            label="Ruta"
+            label="Ruta Completa (Auto-generada)"
             value={newNodeData.path}
-            onChange={(e) =>
-              setNewNodeData({ ...newNodeData, path: e.target.value })
-            }
             margin="normal"
-            helperText="Ruta completa donde se guardarán los archivos"
+            InputProps={{
+              readOnly: true,
+            }}
+            helperText="Esta ruta se genera automáticamente"
+            sx={{
+              '& .MuiInputBase-input': {
+                bgcolor: 'action.hover',
+              },
+            }}
           />
+
           <TextField
             fullWidth
             label="ID del Padre (opcional)"
@@ -231,7 +379,19 @@ const TreeView = () => {
               })
             }
             margin="normal"
+            helperText="Dejar vacío para crear un nodo raíz"
           />
+
+          {monitorConfig && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                <strong>Carpeta monitoreada:</strong> {monitorConfig.watch_folder}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                <strong>Carpeta base de organización:</strong> {monitorConfig.watch_folder}/Organized
+              </Typography>
+            </Box>
+          )}
         </DialogContent>
         <DialogActions>
           <Button onClick={() => setOpenDialog(false)}>Cancelar</Button>
