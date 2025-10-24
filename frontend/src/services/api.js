@@ -31,6 +31,11 @@ export const deleteNode = async (nodeId) => {
   return response.data;
 };
 
+export const updateNode = async (nodeId, nodeData) => {
+  const response = await api.put(`/tree/nodes/${nodeId}`, nodeData);
+  return response.data;
+};
+
 // ==================== REGLAS ====================
 
 export const getRules = async () => {

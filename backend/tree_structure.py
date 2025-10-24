@@ -185,11 +185,20 @@ class FileOrganizationTree:
         for child in node.children:
             self._create_folders_recursive(child, base_path)
     
+    def has_rules(self) -> bool:
+        """Verifica si el árbol tiene alguna regla definida"""
+        all_nodes = self.get_all_nodes()
+        for node in all_nodes:
+            if node.rules:
+                return True
+        return False
+
     def to_dict(self) -> Dict[str, Any]:
         """Convierte el árbol completo a diccionario"""
         return {
             'root': self.root.to_dict(),
-            'total_nodes': len(self.get_all_nodes())
+            'total_nodes': len(self.get_all_nodes()),
+            'has_rules': self.has_rules()
         }
     
     def print_tree(self, node: Optional[TreeNode] = None, prefix: str = '', is_last: bool = True):

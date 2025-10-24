@@ -11,16 +11,16 @@ import {
   DialogActions,
   TextField,
   Alert,
-  FormHelperText,
 } from '@mui/material';
 import {
   FolderOpen,
   Add,
   Delete,
+  Edit,
   ExpandMore,
   ChevronRight,
 } from '@mui/icons-material';
-import { getTree, getAllNodes, createNode, deleteNode, getMonitorConfig } from '../services/api';
+import { getTree, getAllNodes, createNode, deleteNode, updateNode, getMonitorConfig } from '../services/api';
 
 const TreeView = () => {
   const [tree, setTree] = useState(null);
@@ -29,7 +29,15 @@ const TreeView = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [openDialog, setOpenDialog] = useState(false);
+  const [editDialog, setEditDialog] = useState(false);
   const [newNodeData, setNewNodeData] = useState({
+    name: '',
+    path: '',
+    parent_id: null,
+    node_type: 'folder',
+  });
+  const [editNodeData, setEditNodeData] = useState({
+    id: null,
     name: '',
     path: '',
     parent_id: null,
@@ -140,10 +148,62 @@ const TreeView = () => {
         const response = await deleteNode(nodeId);
         if (response.success) {
           loadTree();
+        } else {
+          setError(response.message || 'Error eliminando nodo');
         }
       } catch (err) {
         setError('Error eliminando nodo: ' + err.message);
       }
+    }
+  };
+
+  const handleEditNode = (node) => {
+    setEditNodeData({
+      id: node.id,
+      name: node.name,
+      path: node.path,
+      parent_id: node.parent_id,
+      node_type: node.node_type,
+    });
+    setEditDialog(true);
+  };
+
+  const handleEditNodeNameChange = (name) => {
+    // Actualizar el path automáticamente cuando cambia el nombre
+    if (monitorConfig && monitorConfig.watch_folder) {
+      const basePath = monitorConfig.watch_folder;
+      const newPath = `${basePath}/Organized/${name}`;
+      setEditNodeData({
+        ...editNodeData,
+        name: name,
+        path: newPath,
+      });
+    } else {
+      setEditNodeData({
+        ...editNodeData,
+        name: name,
+      });
+    }
+  };
+
+  const handleUpdateNode = async () => {
+    try {
+      const response = await updateNode(editNodeData.id, editNodeData);
+      if (response.success) {
+        setEditDialog(false);
+        setEditNodeData({
+          id: null,
+          name: '',
+          path: '',
+          parent_id: null,
+          node_type: 'folder',
+        });
+        loadTree();
+      } else {
+        setError(response.message || 'Error actualizando nodo');
+      }
+    } catch (err) {
+      setError('Error actualizando nodo: ' + err.message);
     }
   };
 
@@ -187,16 +247,11 @@ const TreeView = () => {
           
           <Box sx={{ flexGrow: 1 }}>
             <Typography component="span" sx={{ fontWeight: 500 }}>
-              {node.name} <Typography component="span" sx={{ color: 'text.secondary', fontSize: '0.9em' }}>(ID: {node.id})</Typography>
+              {node.name}
             </Typography>
             {parentNode && (
               <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', ml: 0.5 }}>
-                Hijo de: {parentNode.name} (ID: {parentNode.id})
-              </Typography>
-            )}
-            {!parentNode && node.parent_id === null && (
-              <Typography variant="caption" sx={{ display: 'block', color: 'success.main', ml: 0.5 }}>
-                Nodo Raíz
+                Hijo de: {parentNode.name}
               </Typography>
             )}
           </Box>
@@ -204,14 +259,28 @@ const TreeView = () => {
           <Typography variant="caption" sx={{ mr: 2, color: 'text.secondary' }}>
             {node.rules_count || 0} reglas
           </Typography>
-          
-          <IconButton
-            size="small"
-            color="error"
-            onClick={() => handleDeleteNode(node.id)}
-          >
-            <Delete fontSize="small" />
-          </IconButton>
+
+          {/* Solo mostrar edit/delete para nodos que no son root */}
+          {node.parent_id !== null && (
+            <>
+              <IconButton
+                size="small"
+                color="primary"
+                onClick={() => handleEditNode(node)}
+                sx={{ mr: 1 }}
+              >
+                <Edit fontSize="small" />
+              </IconButton>
+
+              <IconButton
+                size="small"
+                color="error"
+                onClick={() => handleDeleteNode(node.id)}
+              >
+                <Delete fontSize="small" />
+              </IconButton>
+            </>
+          )}
         </Box>
 
         {isExpanded && hasChildren && (
@@ -235,7 +304,7 @@ const TreeView = () => {
     <Box>
       <Paper sx={{ p: 3, mb: 2 }}>
         <Box sx={{ display: 'flex', justifyContent: 'space-between', mb: 2 }}>
-          <Typography variant="h5">Estructura del Árbol</Typography>
+          <Typography variant="h5">Estructura de Árbol</Typography>
           <Button
             variant="contained"
             startIcon={<Add />}
@@ -296,21 +365,42 @@ const TreeView = () => {
                   <Box sx={{ display: 'flex', alignItems: 'center', mb: 1 }}>
                     <FolderOpen sx={{ mr: 1, color: 'primary.main' }} />
                     <Typography variant="subtitle1" sx={{ fontWeight: 500 }}>
-                      {node.name} <Typography component="span" sx={{ color: 'text.secondary', fontSize: '0.9em' }}>(ID: {node.id})</Typography>
+                      {node.name}
                     </Typography>
+
+                    {/* Solo mostrar edit/delete para nodos que no son root */}
+                    {node.parent_id !== null && (
+                      <Box sx={{ ml: 'auto' }}>
+                        <IconButton
+                          size="small"
+                          color="primary"
+                          onClick={() => handleEditNode(node)}
+                          sx={{ mr: 1 }}
+                        >
+                          <Edit fontSize="small" />
+                        </IconButton>
+                        <IconButton
+                          size="small"
+                          color="error"
+                          onClick={() => handleDeleteNode(node.id)}
+                        >
+                          <Delete fontSize="small" />
+                        </IconButton>
+                      </Box>
+                    )}
                   </Box>
-                  
+
                   <Typography variant="body2" color="text.secondary" sx={{ ml: 4 }}>
                     <strong>Ruta:</strong> {node.path}
                   </Typography>
-                  
+
                   <Typography variant="body2" color="text.secondary" sx={{ ml: 4 }}>
                     <strong>Tipo:</strong> {node.node_type}
                   </Typography>
-                  
+
                   {parentNode ? (
                     <Typography variant="body2" sx={{ ml: 4, color: 'info.main' }}>
-                      <strong>Hijo de:</strong> {parentNode.name} (ID: {parentNode.id})
+                      <strong>Hijo de:</strong> {parentNode.name}
                     </Typography>
                   ) : (
                     <Typography variant="body2" sx={{ ml: 4, color: 'success.main' }}>
@@ -401,6 +491,78 @@ const TreeView = () => {
             disabled={!newNodeData.name || !newNodeData.path}
           >
             Crear
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* Dialog para editar nodo */}
+      <Dialog open={editDialog} onClose={() => setEditDialog(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Editar Nodo</DialogTitle>
+        <DialogContent>
+          <Alert severity="info" sx={{ mt: 2, mb: 2 }}>
+            Puedes editar el nombre del nodo. La ruta se actualizará automáticamente.
+          </Alert>
+
+          <TextField
+            fullWidth
+            label="Nombre del Nodo (Carpeta)"
+            value={editNodeData.name}
+            onChange={(e) => handleEditNodeNameChange(e.target.value)}
+            margin="normal"
+            autoFocus
+            helperText="Ejemplo: Documentos, Imágenes, Videos, etc."
+          />
+
+          <TextField
+            fullWidth
+            label="Ruta Completa (Auto-generada)"
+            value={editNodeData.path}
+            margin="normal"
+            InputProps={{
+              readOnly: true,
+            }}
+            helperText="Esta ruta se genera automáticamente"
+            sx={{
+              '& .MuiInputBase-input': {
+                bgcolor: 'action.hover',
+              },
+            }}
+          />
+
+          <TextField
+            fullWidth
+            label="ID del Padre (opcional)"
+            type="number"
+            value={editNodeData.parent_id || ''}
+            onChange={(e) =>
+              setEditNodeData({
+                ...editNodeData,
+                parent_id: e.target.value ? parseInt(e.target.value) : null,
+              })
+            }
+            margin="normal"
+            helperText="Dejar vacío para nodo raíz"
+          />
+
+          {monitorConfig && (
+            <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
+              <Typography variant="body2" color="text.secondary">
+                <strong>Carpeta monitoreada:</strong> {monitorConfig.watch_folder}
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                <strong>Carpeta base de organización:</strong> {monitorConfig.watch_folder}/Organized
+              </Typography>
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setEditDialog(false)}>Cancelar</Button>
+          <Button
+            onClick={handleUpdateNode}
+            variant="contained"
+            disabled={!editNodeData.name || !editNodeData.path}
+          >
+            Actualizar
           </Button>
         </DialogActions>
       </Dialog>

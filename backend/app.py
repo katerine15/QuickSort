@@ -245,6 +245,64 @@ def create_node():
         }), 500
 
 
+@app.route('/api/tree/nodes/<int:node_id>', methods=['PUT'])
+def update_node(node_id):
+    """Actualiza un nodo del árbol"""
+    try:
+        node = TreeNode.query.get(node_id)
+        if not node:
+            return jsonify({
+                'success': False,
+                'message': 'Nodo no encontrado'
+            }), 404
+
+        # Verificar si es el nodo raíz (no tiene parent_id)
+        if node.parent_id is None:
+            return jsonify({
+                'success': False,
+                'message': 'No se puede editar el nodo raíz'
+            }), 400
+
+        data = request.get_json()
+
+        if 'name' in data:
+            node.name = data['name']
+        if 'path' in data:
+            node.path = data['path']
+        if 'parent_id' in data:
+            node.parent_id = data['parent_id']
+        if 'node_type' in data:
+            node.node_type = data['node_type']
+
+        db.session.commit()
+
+        # Actualizar árbol en memoria
+        if file_tree:
+            # Buscar el nodo en el árbol y actualizarlo
+            tree_node = file_tree.find_node_by_path(node.path)
+            if tree_node:
+                if 'name' in data:
+                    tree_node.name = data['name']
+                if 'path' in data:
+                    tree_node.path = data['path']
+                if 'node_type' in data:
+                    tree_node.node_type = data['node_type']
+
+        return jsonify({
+            'success': True,
+            'node': node.to_dict(),
+            'message': 'Nodo actualizado'
+        }), 200
+
+    except Exception as e:
+        logger.error(f"Error actualizando nodo: {e}")
+        db.session.rollback()
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+
 @app.route('/api/tree/nodes/<int:node_id>', methods=['DELETE'])
 def delete_node(node_id):
     """Elimina un nodo del árbol"""
@@ -255,15 +313,22 @@ def delete_node(node_id):
                 'success': False,
                 'message': 'Nodo no encontrado'
             }), 404
-        
+
+        # Verificar si es el nodo raíz (no tiene parent_id)
+        if node.parent_id is None:
+            return jsonify({
+                'success': False,
+                'message': 'No se puede eliminar el nodo raíz'
+            }), 400
+
         db.session.delete(node)
         db.session.commit()
-        
+
         return jsonify({
             'success': True,
             'message': 'Nodo eliminado'
         }), 200
-    
+
     except Exception as e:
         logger.error(f"Error eliminando nodo: {e}")
         db.session.rollback()
@@ -305,10 +370,23 @@ def create_rule():
             priority=data.get('priority', 0),
             is_active=data.get('is_active', True)
         )
-        
+
         db.session.add(new_rule)
         db.session.commit()
-        
+
+        # Actualizar árbol en memoria
+        if file_tree:
+            node = TreeNode.query.get(data['node_id'])
+            if node:
+                # Encontrar el nodo en el árbol
+                tree_node = file_tree.find_node_by_path(node.path)
+                if tree_node:
+                    tree_node.add_rule(
+                        rule_type=new_rule.rule_type,
+                        pattern=new_rule.pattern,
+                        priority=new_rule.priority
+                    )
+
         return jsonify({
             'success': True,
             'rule': new_rule.to_dict()
@@ -342,9 +420,26 @@ def update_rule(rule_id):
             rule.priority = data['priority']
         if 'is_active' in data:
             rule.is_active = data['is_active']
-        
+
         db.session.commit()
-        
+
+        # Actualizar árbol en memoria
+        if file_tree:
+            node = TreeNode.query.get(rule.node_id)
+            if node:
+                # Encontrar el nodo en el árbol
+                tree_node = file_tree.find_node_by_path(node.path)
+                if tree_node:
+                    # Limpiar reglas existentes y recargar
+                    tree_node.rules = []
+                    node_rules = OrganizationRule.query.filter_by(node_id=rule.node_id).all()
+                    for node_rule in node_rules:
+                        tree_node.add_rule(
+                            rule_type=node_rule.rule_type,
+                            pattern=node_rule.pattern,
+                            priority=node_rule.priority
+                        )
+
         return jsonify({
             'success': True,
             'rule': rule.to_dict()
@@ -372,7 +467,24 @@ def delete_rule(rule_id):
         
         db.session.delete(rule)
         db.session.commit()
-        
+
+        # Actualizar árbol en memoria
+        if file_tree:
+            node = TreeNode.query.get(rule.node_id)
+            if node:
+                # Encontrar el nodo en el árbol
+                tree_node = file_tree.find_node_by_path(node.path)
+                if tree_node:
+                    # Limpiar reglas existentes y recargar
+                    tree_node.rules = []
+                    node_rules = OrganizationRule.query.filter_by(node_id=rule.node_id).all()
+                    for node_rule in node_rules:
+                        tree_node.add_rule(
+                            rule_type=node_rule.rule_type,
+                            pattern=node_rule.pattern,
+                            priority=node_rule.priority
+                        )
+
         return jsonify({
             'success': True,
             'message': 'Regla eliminada'
@@ -611,6 +723,12 @@ def organize_all_files():
             }), 500
         
         result = file_monitor.organize_existing_files()
+        
+        if 'message' in result and result['message'] == 'No hay reglas definidas para organizar archivos':
+            return jsonify({
+                'success': False,
+                'message': result['message']
+            }), 400
         
         return jsonify({
             'success': True,

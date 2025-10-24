@@ -44,7 +44,7 @@ class FileEventHandler(FileSystemEventHandler):
         # Esperar un momento para asegurar que el archivo esté completamente escrito
         time.sleep(0.5)
         
-        if self.auto_organize:
+        if self.auto_organize and self.organizer.tree.has_rules():
             self._organize_file(file_path)
         else:
             self.pending_files.append(file_path)
@@ -143,6 +143,12 @@ class FileMonitor:
             logger.info(f"Monitor iniciado en: {self.watch_folder}")
             logger.info(f"Auto-organizar: {self.auto_organize}, Recursivo: {self.recursive}")
             
+            # Organizar archivos existentes si auto_organize está activado y hay reglas
+            if self.auto_organize and self.organizer.tree.has_rules():
+                logger.info("Organizando archivos existentes al iniciar monitor...")
+                result = self.organize_existing_files()
+                logger.info(f"Organización inicial completada: {result.get('stats', {})}")
+            
             return True
         
         except Exception as e:
@@ -240,6 +246,14 @@ class FileMonitor:
     
     def organize_existing_files(self):
         """Organiza todos los archivos existentes en la carpeta"""
+        if not self.organizer.tree.has_rules():
+            return {
+                'total_files': 0,
+                'results': [],
+                'stats': self.organizer.get_stats(),
+                'message': 'No hay reglas definidas para organizar archivos'
+            }
+        
         existing_files = self.scan_existing_files()
         results = []
         

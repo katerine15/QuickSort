@@ -18,14 +18,26 @@ import {
   TableRow,
   CircularProgress,
   Divider,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+  IconButton,
+  Menu,
+  MenuItem,
+  Badge,
 } from '@mui/material';
+import {
+  Notifications as NotificationsIcon,
+  CheckCircle,
+  Cancel,
+} from '@mui/icons-material';
 import {
   PlayArrow,
   Stop,
   Folder,
   Refresh,
   FolderOpen,
-  CheckCircle,
   Warning,
 } from '@mui/icons-material';
 import {
@@ -36,6 +48,7 @@ import {
   updateMonitorConfig,
   getMonitorFiles,
   organizeAllFiles,
+  getTree,
 } from '../services/api';
 
 const FileMonitor = () => {
@@ -49,6 +62,9 @@ const FileMonitor = () => {
   const [error, setError] = useState(null);
   const [success, setSuccess] = useState(null);
   const [newWatchFolder, setNewWatchFolder] = useState('');
+  const [tree, setTree] = useState(null);
+  const [confirmationDialog, setConfirmationDialog] = useState(false);
+  const [confirmationMessage, setConfirmationMessage] = useState('');
 
   useEffect(() => {
     loadMonitorData();
@@ -65,9 +81,10 @@ const FileMonitor = () => {
 
   const loadMonitorData = async () => {
     try {
-      const [statusResponse, configResponse] = await Promise.all([
+      const [statusResponse, configResponse, treeResponse] = await Promise.all([
         getMonitorStatus(),
         getMonitorConfig(),
+        getTree(),
       ]);
 
       if (statusResponse.success) {
@@ -76,6 +93,10 @@ const FileMonitor = () => {
 
       if (configResponse.success) {
         setConfig(configResponse.config);
+      }
+
+      if (treeResponse.success) {
+        setTree(treeResponse.tree);
       }
 
       setError(null);
@@ -107,6 +128,11 @@ const FileMonitor = () => {
   };
 
   const handleOrganizeAll = async () => {
+    if (!tree || !tree.has_rules) {
+      setError('No hay reglas definidas para organizar archivos. Crea reglas primero.');
+      return;
+    }
+
     if (!window.confirm('¿Deseas organizar todos los archivos según las reglas definidas?')) {
       return;
     }
@@ -118,6 +144,8 @@ const FileMonitor = () => {
       if (response.success) {
         setSuccess(`Archivos organizados: ${response.result.stats.files_moved} movidos, ${response.result.stats.files_failed} fallidos`);
         loadFiles(); // Recargar lista de archivos
+      } else {
+        setError(response.message || 'Error organizando archivos');
       }
     } catch (err) {
       setError('Error organizando archivos: ' + err.message);
@@ -140,12 +168,52 @@ const FileMonitor = () => {
       if (response.success) {
         setSuccess('Monitor iniciado correctamente');
         loadMonitorData();
+        // Mostrar diálogo de confirmación si hay reglas
+        if (tree && tree.has_rules) {
+          setConfirmationMessage('¿Deseas organizar automáticamente los archivos según las reglas definidas?');
+          setConfirmationDialog(true);
+        }
       } else {
         setError(response.message);
       }
     } catch (err) {
       setError('Error iniciando monitor: ' + err.message);
     }
+  };
+
+  const handleConfirmOrganization = async () => {
+    try {
+      setOrganizing(true);
+      const response = await organizeAllFiles();
+
+      if (response.success) {
+        setSuccess(`Archivos organizados: ${response.result.stats.files_moved} movidos, ${response.result.stats.files_failed} fallidos`);
+        loadFiles();
+      } else {
+        setError(response.message || 'Error organizando archivos');
+      }
+    } catch (err) {
+      setError('Error organizando archivos: ' + err.message);
+    } finally {
+      setOrganizing(false);
+      setConfirmationDialog(false);
+    }
+  };
+
+  const handleRejectOrganization = () => {
+    // Guardar notificación localmente
+    const notification = {
+      id: Date.now(),
+      message: 'Organización automática rechazada',
+      timestamp: new Date().toISOString(),
+      type: 'rejected_organization'
+    };
+
+    const existingNotifications = JSON.parse(localStorage.getItem('rejectedNotifications') || '[]');
+    existingNotifications.push(notification);
+    localStorage.setItem('rejectedNotifications', JSON.stringify(existingNotifications));
+
+    setConfirmationDialog(false);
   };
 
   const handleStopMonitor = async () => {
@@ -356,7 +424,7 @@ const FileMonitor = () => {
               color="primary"
               startIcon={organizing ? <CircularProgress size={20} /> : <FolderOpen />}
               onClick={handleOrganizeAll}
-              disabled={organizing || !files.length || !filesStats?.with_rules}
+              disabled={organizing || !files.length || !tree?.has_rules}
             >
               {organizing ? 'Organizando...' : 'Organizar Todos'}
             </Button>
@@ -466,6 +534,42 @@ const FileMonitor = () => {
           </TableContainer>
         )}
       </Paper>
+
+      {/* Confirmation Dialog for Organization */}
+      <Dialog
+        open={confirmationDialog}
+        onClose={() => setConfirmationDialog(false)}
+        maxWidth="sm"
+        fullWidth
+      >
+        <DialogTitle>Confirmar Organización</DialogTitle>
+        <DialogContent>
+          <Typography variant="body1" sx={{ mb: 2 }}>
+            {confirmationMessage}
+          </Typography>
+          <Alert severity="info">
+            Los archivos serán organizados automáticamente según las reglas definidas.
+          </Alert>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={handleRejectOrganization}
+            color="error"
+            startIcon={<Cancel />}
+          >
+            Rechazar
+          </Button>
+          <Button
+            onClick={handleConfirmOrganization}
+            variant="contained"
+            color="success"
+            startIcon={<CheckCircle />}
+            disabled={organizing}
+          >
+            {organizing ? 'Organizando...' : 'Aceptar'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };
