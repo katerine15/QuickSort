@@ -151,6 +151,11 @@ class FileOrganizationTree:
         
         all_nodes = self.get_all_nodes()
         
+        # Normalizar la extensión del archivo (asegurar que tenga el punto)
+        normalized_file_ext = file_extension.lower()
+        if normalized_file_ext and not normalized_file_ext.startswith('.'):
+            normalized_file_ext = '.' + normalized_file_ext
+        
         for node in all_nodes:
             for rule in node.rules:
                 if not rule['is_active']:
@@ -159,7 +164,13 @@ class FileOrganizationTree:
                 match = False
                 
                 if rule['rule_type'] == 'extension':
-                    if file_extension.lower() == rule['pattern'].lower():
+                    # Normalizar el patrón de la regla (asegurar que tenga el punto)
+                    normalized_pattern = rule['pattern'].lower().strip()
+                    if normalized_pattern and not normalized_pattern.startswith('.'):
+                        normalized_pattern = '.' + normalized_pattern
+                    
+                    # Comparar extensiones normalizadas
+                    if normalized_file_ext == normalized_pattern:
                         match = True
                 
                 elif rule['rule_type'] == 'keyword':

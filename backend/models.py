@@ -19,17 +19,39 @@ class TreeNode(db.Model):
     children = db.relationship('TreeNode', backref=db.backref('parent', remote_side=[id]), lazy='dynamic')
     rules = db.relationship('OrganizationRule', backref='node', lazy='dynamic', cascade='all, delete-orphan')
     
-    def to_dict(self):
-        return {
+    def to_dict(self, include_children=True, max_depth=10, current_depth=0):
+        """
+        Convierte el nodo a diccionario
+        
+        Args:
+            include_children: Si incluir los hijos en la serialización
+            max_depth: Profundidad máxima de recursión
+            current_depth: Profundidad actual (para control interno)
+        """
+        result = {
             'id': self.id,
             'name': self.name,
             'path': self.path,
             'parent_id': self.parent_id,
             'node_type': self.node_type,
             'created_at': self.created_at.isoformat(),
-            'children': [child.to_dict() for child in self.children],
             'rules_count': self.rules.count()
         }
+        
+        # Solo incluir hijos si se solicita y no hemos excedido la profundidad máxima
+        if include_children and current_depth < max_depth:
+            result['children'] = [
+                child.to_dict(
+                    include_children=True, 
+                    max_depth=max_depth, 
+                    current_depth=current_depth + 1
+                ) 
+                for child in self.children
+            ]
+        else:
+            result['children'] = []
+        
+        return result
     
     def __repr__(self):
         return f'<TreeNode {self.name}>'

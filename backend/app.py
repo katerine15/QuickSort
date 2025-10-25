@@ -363,10 +363,17 @@ def create_rule():
     try:
         data = request.get_json()
         
+        # Normalizar el patrón si es una regla de extensión
+        pattern = data['pattern'].strip()
+        if data['rule_type'] == 'extension':
+            # Asegurar que las extensiones tengan el punto al inicio
+            if pattern and not pattern.startswith('.'):
+                pattern = '.' + pattern
+        
         new_rule = OrganizationRule(
             node_id=data['node_id'],
             rule_type=data['rule_type'],
-            pattern=data['pattern'],
+            pattern=pattern,
             priority=data.get('priority', 0),
             is_active=data.get('is_active', True)
         )
@@ -386,6 +393,8 @@ def create_rule():
                         pattern=new_rule.pattern,
                         priority=new_rule.priority
                     )
+
+        logger.info(f"Regla creada: {new_rule.rule_type} - {new_rule.pattern} para nodo {data['node_id']}")
 
         return jsonify({
             'success': True,
@@ -415,7 +424,12 @@ def update_rule(rule_id):
         data = request.get_json()
         
         if 'pattern' in data:
-            rule.pattern = data['pattern']
+            pattern = data['pattern'].strip()
+            # Normalizar el patrón si es una regla de extensión
+            if rule.rule_type == 'extension':
+                if pattern and not pattern.startswith('.'):
+                    pattern = '.' + pattern
+            rule.pattern = pattern
         if 'priority' in data:
             rule.priority = data['priority']
         if 'is_active' in data:
@@ -439,6 +453,8 @@ def update_rule(rule_id):
                             pattern=node_rule.pattern,
                             priority=node_rule.priority
                         )
+
+        logger.info(f"Regla actualizada: {rule.rule_type} - {rule.pattern}")
 
         return jsonify({
             'success': True,

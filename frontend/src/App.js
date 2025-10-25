@@ -17,6 +17,7 @@ import {
   ListItemIcon,
   Divider,
   Badge,
+  Button
 } from '@mui/material';
 import {
   AccountTree,
@@ -27,6 +28,7 @@ import {
   CheckCircle,
   Clear,
 } from '@mui/icons-material';
+import { organizeAllFiles } from './services/api';
 import TreeView from './components/TreeView';
 import FileMonitor from './components/FileMonitor';
 import RuleManager from './components/RuleManager';
@@ -91,6 +93,33 @@ function App() {
     const updatedNotifications = notifications.filter(n => n.id !== notificationId);
     setNotifications(updatedNotifications);
     localStorage.setItem('rejectedNotifications', JSON.stringify(updatedNotifications));
+  };
+
+  const acceptNotification = async (notificationId) => {
+    const notification = notifications.find(n => n.id === notificationId);
+    if (notification && notification.action) {
+      try {
+        // Execute the original action
+        if (notification.action.type === 'organize_files') {
+          // Call organize all files API
+          const result = await organizeAllFiles();
+
+          if (result.success) {
+            alert(`Archivos organizados: ${result.result.stats.files_moved} movidos, ${result.result.stats.files_failed} fallidos`);
+          } else {
+            alert('Error organizando archivos: ' + result.message);
+          }
+        }
+
+        // Remove the notification after successful execution
+        clearNotification(notificationId);
+      } catch (error) {
+        alert('Error ejecutando la acción: ' + error.message);
+      }
+    } else {
+      // If no action info, just remove the notification
+      clearNotification(notificationId);
+    }
   };
 
   const clearAllNotifications = () => {
@@ -188,21 +217,36 @@ function App() {
           ) : (
             <>
               {notifications.map((notification) => (
-                <MenuItem key={notification.id} sx={{ display: 'flex', alignItems: 'center' }}>
-                  <ListItemIcon>
-                    <Clear color="error" fontSize="small" />
-                  </ListItemIcon>
-                  <ListItemText
-                    primary={notification.message}
-                    secondary={new Date(notification.timestamp).toLocaleString()}
-                  />
-                  <IconButton
-                    size="small"
-                    onClick={() => clearNotification(notification.id)}
-                    sx={{ ml: 1 }}
-                  >
-                    <Clear fontSize="small" />
-                  </IconButton>
+                <MenuItem key={notification.id} sx={{ display: 'flex', alignItems: 'center', flexDirection: 'column', alignItems: 'stretch' }}>
+                  <Box sx={{ display: 'flex', alignItems: 'center', width: '100%', mb: 1 }}>
+                    <ListItemIcon>
+                      <Clear color="error" fontSize="small" />
+                    </ListItemIcon>
+                    <ListItemText
+                      primary={notification.message}
+                      secondary={new Date(notification.timestamp).toLocaleString()}
+                    />
+                  </Box>
+                  <Box sx={{ display: 'flex', justifyContent: 'flex-end', gap: 1 }}>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="success"
+                      startIcon={<CheckCircle />}
+                      onClick={() => acceptNotification(notification.id)}
+                    >
+                      Aceptar
+                    </Button>
+                    <Button
+                      size="small"
+                      variant="outlined"
+                      color="error"
+                      startIcon={<Clear />}
+                      onClick={() => clearNotification(notification.id)}
+                    >
+                      Eliminar
+                    </Button>
+                  </Box>
                 </MenuItem>
               ))}
 

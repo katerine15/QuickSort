@@ -308,8 +308,10 @@ const RuleManager = () => {
             margin="normal"
             helperText={
               ruleData.rule_type === 'extension'
-                ? 'Ejemplo: .pdf, .jpg, .docx'
-                : 'Ejemplo: factura, reporte, contrato'
+                ? 'Ingresa la extensión del archivo (con o sin punto). Ejemplos: .pdf, jpg, .docx, png'
+                : ruleData.rule_type === 'keyword'
+                ? 'Ingresa una palabra clave que debe aparecer en el nombre del archivo. Ejemplo: factura, reporte, contrato'
+                : 'Ingresa el patrón para esta regla'
             }
           />
 

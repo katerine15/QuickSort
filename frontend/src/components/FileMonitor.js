@@ -201,12 +201,16 @@ const FileMonitor = () => {
   };
 
   const handleRejectOrganization = () => {
-    // Guardar notificación localmente
+    // Guardar notificación localmente con información de la acción
     const notification = {
       id: Date.now(),
       message: 'Organización automática rechazada',
       timestamp: new Date().toISOString(),
-      type: 'rejected_organization'
+      type: 'rejected_organization',
+      action: {
+        type: 'organize_files',
+        description: 'Organizar todos los archivos según las reglas definidas'
+      }
     };
 
     const existingNotifications = JSON.parse(localStorage.getItem('rejectedNotifications') || '[]');
