@@ -118,6 +118,32 @@ export const previewOrganization = async (folderPath, recursive = false) => {
   return response.data;
 };
 
+// ==================== GRAFOS / RELACIONES DE CARPETAS ====================
+
+export const connectProjectFolders = async ({
+  base_path,
+  current_folder,
+  backup_dir = null,
+  copy_on_confirm = false,
+  create_backup = false,
+  preferred_related_folder = null,
+}) => {
+  const response = await api.post('/graph/connect', {
+    base_path,
+    current_folder,
+    backup_dir,
+    copy_on_confirm,
+    create_backup,
+    preferred_related_folder,
+  });
+  return response.data;
+};
+
+export const getTreeRelations = async () => {
+  const response = await api.get('/tree/relations');
+  return response.data;
+};
+
 // ==================== LOGS ====================
 
 export const getLogs = async (limit = 100) => {

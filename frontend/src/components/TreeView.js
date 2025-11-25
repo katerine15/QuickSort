@@ -11,6 +11,11 @@ import {
   DialogActions,
   TextField,
   Alert,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
+  Chip,
 } from '@mui/material';
 import {
   FolderOpen,
@@ -20,7 +25,16 @@ import {
   ExpandMore,
   ChevronRight,
 } from '@mui/icons-material';
-import { getTree, getAllNodes, createNode, deleteNode, updateNode, getMonitorConfig } from '../services/api';
+import {
+  getTree,
+  getAllNodes,
+  createNode,
+  deleteNode,
+  updateNode,
+  getMonitorConfig,
+  connectProjectFolders,
+  getTreeRelations,
+} from '../services/api';
 
 const TreeView = () => {
   const [tree, setTree] = useState(null);
@@ -28,6 +42,13 @@ const TreeView = () => {
   const [monitorConfig, setMonitorConfig] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [graphToast, setGraphToast] = useState(null);
+  const [graphRelated, setGraphRelated] = useState([]);
+  const [relations, setRelations] = useState({});
+  const [actionMessage, setActionMessage] = useState(null);
+  const [actionError, setActionError] = useState(null);
+  const [actionLoading, setActionLoading] = useState(false);
+  const [selectedRelation, setSelectedRelation] = useState({});
   const [openDialog, setOpenDialog] = useState(false);
   const [editDialog, setEditDialog] = useState(false);
   const [newNodeData, setNewNodeData] = useState({
@@ -53,9 +74,10 @@ const TreeView = () => {
   const loadTree = async () => {
     try {
       setLoading(true);
-      const [treeResponse, nodesResponse] = await Promise.all([
+      const [treeResponse, nodesResponse, relationsResponse] = await Promise.all([
         getTree(),
         getAllNodes(),
+        getTreeRelations(),
       ]);
 
       if (treeResponse.success) {
@@ -63,7 +85,28 @@ const TreeView = () => {
       }
 
       if (nodesResponse.success) {
-        setNodes(nodesResponse.nodes);
+        let dbNodes = nodesResponse.nodes || [];
+        // Incluir nodo raíz virtual si no existe en la lista proveniente de la BD
+        if (treeResponse.success && treeResponse.tree?.root) {
+          const rootNode = treeResponse.tree.root;
+          const existsRoot = dbNodes.some((n) => n.path === rootNode.path);
+          if (!existsRoot) {
+            dbNodes = [
+              {
+                ...rootNode,
+                id: rootNode.id || 'root-virtual',
+                parent_id: null,
+                is_virtual_root: true,
+              },
+              ...dbNodes,
+            ];
+          }
+        }
+        setNodes(dbNodes);
+      }
+
+      if (relationsResponse.success) {
+        setRelations(relationsResponse.relations || {});
       }
 
       setError(null);
@@ -126,7 +169,20 @@ const TreeView = () => {
 
   const handleCreateNode = async () => {
     try {
-      const response = await createNode(newNodeData);
+      // Derivar base para grafo: carpeta a monitorear o carpeta padre
+      const parentPath = newNodeData.parent_id
+        ? nodes.find((n) => n.id === newNodeData.parent_id)?.path
+        : null;
+      const graphBasePath =
+        monitorConfig?.watch_folder ||
+        (parentPath && parentPath.split('/').slice(0, -1).join('/')) ||
+        (newNodeData.path && newNodeData.path.split('/').slice(0, -1).join('/')) ||
+        '';
+
+      const response = await createNode({
+        ...newNodeData,
+        graph_base_path: graphBasePath,
+      });
       if (response.success) {
         setOpenDialog(false);
         setNewNodeData({
@@ -136,6 +192,23 @@ const TreeView = () => {
           node_type: 'folder',
         });
         loadTree();
+
+        // Mostrar sugerencia de grafo si existe
+        if (response.graph) {
+          setGraphToast(response.graph.toast);
+          setGraphRelated(response.graph.related_folders || []);
+        } else {
+          setGraphToast(null);
+          setGraphRelated([]);
+        }
+
+        // Recargar relaciones después de crear un nodo
+        const relationsResponse = await getTreeRelations();
+        if (relationsResponse.success) {
+          setRelations(relationsResponse.relations || {});
+        } else if (response.graph?.relations_bidirectional) {
+          setRelations(response.graph.relations_bidirectional);
+        }
       }
     } catch (err) {
       setError('Error creando nodo: ' + err.message);
@@ -143,6 +216,10 @@ const TreeView = () => {
   };
 
   const handleDeleteNode = async (nodeId) => {
+    if (typeof nodeId !== 'number') {
+      setError('No se puede eliminar este nodo porque no está registrado en la base de datos.');
+      return;
+    }
     if (window.confirm('¿Estás seguro de eliminar este nodo?')) {
       try {
         const response = await deleteNode(nodeId);
@@ -158,6 +235,10 @@ const TreeView = () => {
   };
 
   const handleEditNode = (node) => {
+    if (typeof node.id !== 'number') {
+      setError('No se puede editar este nodo porque no está registrado en la base de datos.');
+      return;
+    }
     setEditNodeData({
       id: node.id,
       name: node.name,
@@ -207,6 +288,91 @@ const TreeView = () => {
     }
   };
 
+  const deriveBasePath = (nodePath) => {
+    if (monitorConfig?.watch_folder) return monitorConfig.watch_folder;
+    if (!nodePath) return '';
+    const parts = nodePath.split('/');
+    if (parts.length > 1) {
+      parts.pop();
+      return parts.join('/');
+    }
+    return nodePath;
+  };
+
+  const handleNodeCopy = async (node, relatedFolder) => {
+    try {
+      setActionLoading(true);
+      setActionError(null);
+      const basePath = deriveBasePath(node.path);
+      const response = await connectProjectFolders({
+        base_path: basePath,
+        current_folder: node.path,
+        preferred_related_folder: relatedFolder || null,
+        copy_on_confirm: true,
+        create_backup: false,
+      });
+
+      if (response.success) {
+        const copyResult = response.result?.copy_result;
+        const toast = response.result?.toast;
+        const selectedRelation = response.result?.selected_relation;
+        const bidirectional = response.result?.relations_bidirectional;
+        if (bidirectional) {
+          setRelations(bidirectional);
+        }
+        if (copyResult) {
+          const copied = copyResult.copied?.length || 0;
+          const skipped = copyResult.skipped?.length || 0;
+          const relName = selectedRelation?.folder || relatedFolder || 'mejor coincidencia';
+          setActionMessage(`Copiado desde relación (${relName}): ${copied} archivos, ${skipped} omitidos.`);
+        } else if (toast) {
+          setActionMessage(toast);
+        } else {
+          setActionMessage('Relación detectada pero no se copiaron archivos.');
+        }
+      } else {
+        setActionError(response.message || 'No se pudo copiar desde la relación.');
+      }
+    } catch (err) {
+      setActionError('Error copiando archivos: ' + err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
+  const handleNodeBackup = async (node) => {
+    try {
+      setActionLoading(true);
+      setActionError(null);
+      const basePath = deriveBasePath(node.path);
+      const response = await connectProjectFolders({
+        base_path: basePath,
+        current_folder: node.path,
+        copy_on_confirm: false,
+        create_backup: true,
+      });
+
+      if (response.success) {
+        const bidirectional = response.result?.relations_bidirectional;
+        if (bidirectional) {
+          setRelations(bidirectional);
+        }
+        const backupPath = response.result?.backup_path;
+        if (backupPath) {
+          setActionMessage(`Backup creado en: ${backupPath}`);
+        } else {
+          setActionMessage('Backup procesado sin ruta devuelta.');
+        }
+      } else {
+        setActionError(response.message || 'No se pudo crear el backup.');
+      }
+    } catch (err) {
+      setActionError('Error creando backup: ' + err.message);
+    } finally {
+      setActionLoading(false);
+    }
+  };
+
   const toggleNode = (nodeId) => {
     const newExpanded = new Set(expandedNodes);
     if (newExpanded.has(nodeId)) {
@@ -220,6 +386,8 @@ const TreeView = () => {
   const renderTreeNode = (node, level = 0) => {
     const isExpanded = expandedNodes.has(node.id);
     const hasChildren = node.children && node.children.length > 0;
+    const nodeRelations = relations[node.path] || [];
+    const selectedRelForNode = selectedRelation[node.path] || (nodeRelations[0]?.folder || '');
     
     // Encontrar información del padre
     const parentNode = node.parent_id 
@@ -260,32 +428,93 @@ const TreeView = () => {
             {node.rules_count || 0} reglas
           </Typography>
 
-          {/* Solo mostrar edit/delete para nodos que no son root */}
-          {node.parent_id !== null && (
-            <>
-              <IconButton
-                size="small"
-                color="primary"
-                onClick={() => handleEditNode(node)}
-                sx={{ mr: 1 }}
-              >
-                <Edit fontSize="small" />
-              </IconButton>
-
-              <IconButton
-                size="small"
-                color="error"
-                onClick={() => handleDeleteNode(node.id)}
-              >
-                <Delete fontSize="small" />
-              </IconButton>
-            </>
+          {nodeRelations.length > 0 && (
+            <Chip
+              label={`Relaciones: ${nodeRelations.length}`}
+              color="secondary"
+              size="small"
+              sx={{ mr: 1 }}
+            />
           )}
+
+          <IconButton
+            size="small"
+            color="primary"
+            onClick={() => handleEditNode(node)}
+            sx={{ mr: 1 }}
+          >
+            <Edit fontSize="small" />
+          </IconButton>
+
+          <IconButton
+            size="small"
+            color="error"
+            onClick={() => handleDeleteNode(node.id)}
+          >
+            <Delete fontSize="small" />
+          </IconButton>
         </Box>
 
         {isExpanded && hasChildren && (
           <Box>
             {node.children.map((child) => renderTreeNode(child, level + 1))}
+          </Box>
+        )}
+
+        {nodeRelations.length > 0 && (
+          <Box sx={{ ml: (level + 1) * 3, mt: 1, mb: 2, display: 'flex', flexDirection: 'column', gap: 1.5 }}>
+            {nodeRelations.map((rel) => (
+              <Box
+                key={`${node.id}-${rel.folder}`}
+                sx={{ display: 'flex', alignItems: 'center', gap: 1, flexWrap: 'wrap' }}
+              >
+                <Chip
+                  label={`${rel.folder} (${rel.shared_keywords.join(', ')})`}
+                  variant="outlined"
+                  size="small"
+                  color="secondary"
+                />
+              </Box>
+            ))}
+            {nodeRelations.length > 1 && (
+              <FormControl size="small" sx={{ minWidth: 220 }}>
+                <InputLabel>Selecciona relación</InputLabel>
+                <Select
+                  label="Selecciona relación"
+                  value={selectedRelForNode}
+                  onChange={(e) =>
+                    setSelectedRelation((prev) => ({
+                      ...prev,
+                      [node.path]: e.target.value,
+                    }))
+                  }
+                >
+                  {nodeRelations.map((rel) => (
+                    <MenuItem key={`${node.id}-${rel.folder}-select`} value={rel.folder}>
+                      {rel.folder} ({rel.shared_keywords.join(', ')})
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
+            )}
+            <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Button
+                variant="contained"
+                size="small"
+                onClick={() => handleNodeCopy(node, selectedRelForNode)}
+                disabled={actionLoading}
+              >
+                Copiar mejor relación
+              </Button>
+              <Button
+                variant="outlined"
+                size="small"
+                onClick={() => handleNodeBackup(node)}
+                disabled={actionLoading}
+              >
+                Crear backup
+              </Button>
+            </Box>
           </Box>
         )}
       </Box>
@@ -319,6 +548,35 @@ const TreeView = () => {
             {error}
           </Alert>
         )}
+        {actionError && (
+          <Alert severity="error" sx={{ mb: 2 }} onClose={() => setActionError(null)}>
+            {actionError}
+          </Alert>
+        )}
+        {actionMessage && (
+          <Alert severity="success" sx={{ mb: 2 }} onClose={() => setActionMessage(null)}>
+            {actionMessage}
+          </Alert>
+        )}
+        {graphToast && (
+          <Alert severity="info" sx={{ mb: 2 }} onClose={() => setGraphToast(null)}>
+            {graphToast}
+            {graphRelated.length > 0 && (
+              <Box sx={{ mt: 1, display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+                {graphRelated.slice(0, 5).map((rel) => (
+                  <Chip
+                    key={rel.folder}
+                    label={`${rel.folder} (${rel.shared_keywords.join(', ')})`}
+                    size="small"
+                  />
+                ))}
+                {graphRelated.length > 5 && (
+                  <Chip label={`+${graphRelated.length - 5} más`} size="small" />
+                )}
+              </Box>
+            )}
+          </Alert>
+        )}
 
         {tree && tree.root ? (
           <Box sx={{ mt: 2 }}>
@@ -349,6 +607,8 @@ const TreeView = () => {
               const parentNode = node.parent_id 
                 ? nodes.find(n => n.id === node.parent_id) 
                 : null;
+              const nodeRelations = relations[node.path] || [];
+              const selectedRelForNode = selectedRelation[node.path] || (nodeRelations[0]?.folder || '');
               
               return (
                 <Box
@@ -368,26 +628,23 @@ const TreeView = () => {
                       {node.name}
                     </Typography>
 
-                    {/* Solo mostrar edit/delete para nodos que no son root */}
-                    {node.parent_id !== null && (
-                      <Box sx={{ ml: 'auto' }}>
-                        <IconButton
-                          size="small"
-                          color="primary"
-                          onClick={() => handleEditNode(node)}
-                          sx={{ mr: 1 }}
-                        >
-                          <Edit fontSize="small" />
-                        </IconButton>
-                        <IconButton
-                          size="small"
-                          color="error"
-                          onClick={() => handleDeleteNode(node.id)}
-                        >
-                          <Delete fontSize="small" />
-                        </IconButton>
-                      </Box>
-                    )}
+                    <Box sx={{ ml: 'auto', display: 'flex', gap: 0.5 }}>
+                      <IconButton
+                        size="small"
+                        color="primary"
+                        onClick={() => handleEditNode(node)}
+                        sx={{ mr: 1 }}
+                      >
+                        <Edit fontSize="small" />
+                      </IconButton>
+                      <IconButton
+                        size="small"
+                        color="error"
+                        onClick={() => handleDeleteNode(node.id)}
+                      >
+                        <Delete fontSize="small" />
+                      </IconButton>
+                    </Box>
                   </Box>
 
                   <Typography variant="body2" color="text.secondary" sx={{ ml: 4 }}>
@@ -411,6 +668,53 @@ const TreeView = () => {
                   <Typography variant="body2" color="text.secondary" sx={{ ml: 4 }}>
                     <strong>Reglas:</strong> {node.rules_count || 0}
                   </Typography>
+
+                  {nodeRelations.length > 0 && (
+                    <Box sx={{ mt: 1, ml: 4, display: 'flex', flexDirection: 'column', gap: 1 }}>
+                      <Typography variant="body2" color="text.secondary">
+                        Relaciones (grafos):
+                      </Typography>
+                      {nodeRelations.length > 1 && (
+                        <FormControl size="small" sx={{ minWidth: 220 }}>
+                          <InputLabel>Selecciona relación</InputLabel>
+                          <Select
+                            label="Selecciona relación"
+                            value={selectedRelForNode}
+                            onChange={(e) =>
+                              setSelectedRelation((prev) => ({
+                                ...prev,
+                                [node.path]: e.target.value,
+                              }))
+                            }
+                          >
+                            {nodeRelations.map((rel) => (
+                              <MenuItem key={`${node.id}-${rel.folder}-list`} value={rel.folder}>
+                                {rel.folder} ({rel.shared_keywords.join(', ')})
+                              </MenuItem>
+                            ))}
+                          </Select>
+                        </FormControl>
+                      )}
+                      <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                        <Button
+                          variant="contained"
+                          size="small"
+                          onClick={() => handleNodeCopy(node, selectedRelForNode)}
+                          disabled={actionLoading}
+                        >
+                          Copiar relación
+                        </Button>
+                        <Button
+                          variant="outlined"
+                          size="small"
+                          onClick={() => handleNodeBackup(node)}
+                          disabled={actionLoading}
+                        >
+                          Backup
+                        </Button>
+                      </Box>
+                    </Box>
+                  )}
                 </Box>
               );
             })}
@@ -457,20 +761,31 @@ const TreeView = () => {
             }}
           />
 
-          <TextField
-            fullWidth
-            label="ID del Padre (opcional)"
-            type="number"
-            value={newNodeData.parent_id || ''}
-            onChange={(e) =>
-              setNewNodeData({
-                ...newNodeData,
-                parent_id: e.target.value ? parseInt(e.target.value) : null,
-              })
-            }
-            margin="normal"
-            helperText="Dejar vacío para crear un nodo raíz"
-          />
+          <FormControl fullWidth margin="normal">
+            <InputLabel>Nodo Padre (opcional)</InputLabel>
+            <Select
+              value={newNodeData.parent_id || ''}
+              onChange={(e) =>
+                setNewNodeData({
+                  ...newNodeData,
+                  parent_id: e.target.value ? parseInt(e.target.value) : null,
+                })
+              }
+              label="Nodo Padre (opcional)"
+            >
+              <MenuItem value="">
+                <em>Sin padre (Nodo raíz)</em>
+              </MenuItem>
+              {nodes.map((node) => (
+                <MenuItem key={node.id} value={node.id}>
+                  {node.name} {node.parent_id && '(hijo)'}
+                </MenuItem>
+              ))}
+            </Select>
+            <Typography variant="caption" sx={{ mt: 0.5, ml: 1.5, color: 'text.secondary' }}>
+              Selecciona un nodo padre para crear este nodo dentro de él
+            </Typography>
+          </FormControl>
 
           {monitorConfig && (
             <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>
@@ -529,20 +844,31 @@ const TreeView = () => {
             }}
           />
 
-          <TextField
-            fullWidth
-            label="ID del Padre (opcional)"
-            type="number"
-            value={editNodeData.parent_id || ''}
-            onChange={(e) =>
-              setEditNodeData({
-                ...editNodeData,
-                parent_id: e.target.value ? parseInt(e.target.value) : null,
-              })
-            }
-            margin="normal"
-            helperText="Dejar vacío para nodo raíz"
-          />
+          <FormControl fullWidth margin="normal">
+            <InputLabel>Nodo Padre (opcional)</InputLabel>
+            <Select
+              value={editNodeData.parent_id || ''}
+              onChange={(e) =>
+                setEditNodeData({
+                  ...editNodeData,
+                  parent_id: e.target.value ? parseInt(e.target.value) : null,
+                })
+              }
+              label="Nodo Padre (opcional)"
+            >
+              <MenuItem value="">
+                <em>Sin padre (Nodo raíz)</em>
+              </MenuItem>
+              {nodes.filter(n => n.id !== editNodeData.id).map((node) => (
+                <MenuItem key={node.id} value={node.id}>
+                  {node.name} {node.parent_id && '(hijo)'}
+                </MenuItem>
+              ))}
+            </Select>
+            <Typography variant="caption" sx={{ mt: 0.5, ml: 1.5, color: 'text.secondary' }}>
+              Selecciona un nodo padre para mover este nodo dentro de él
+            </Typography>
+          </FormControl>
 
           {monitorConfig && (
             <Box sx={{ mt: 2, p: 2, bgcolor: 'background.default', borderRadius: 1 }}>

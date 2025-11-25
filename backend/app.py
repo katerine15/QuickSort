@@ -10,6 +10,7 @@ from file_monitor import FileMonitor
 from config import Config
 import os
 import logging
+from graphStructure import connect_project_folders, compute_keyword_relations
 
 # Configurar logging
 logging.basicConfig(
@@ -65,6 +66,8 @@ def init_tree():
         nodes = TreeNode.query.order_by(TreeNode.id).all()
         rules = OrganizationRule.query.all()
 
+        logger.info(f"Cargando {len(nodes)} nodos y {len(rules)} reglas desde la base de datos")
+
         # Crear un diccionario para mapear reglas por node_id
         rules_by_node = {}
         for rule in rules:
@@ -72,31 +75,54 @@ def init_tree():
                 rules_by_node[rule.node_id] = []
             rules_by_node[rule.node_id].append(rule)
 
-        for node in nodes:
-            # Reconstruir árbol desde BD
-            if node.parent_id is None:
-                # Es un nodo raíz, cargar sus reglas
-                if node.id in rules_by_node:
-                    for rule in rules_by_node[node.id]:
-                        file_tree.root.add_rule(
-                            rule_type=rule.rule_type,
-                            pattern=rule.pattern,
-                            priority=rule.priority
-                        )
-                continue
+        # Crear un diccionario para mapear nodos por ID para búsqueda rápida
+        nodes_by_id = {node.id: node for node in nodes}
+        
+        # Función recursiva para agregar nodos y sus hijos
+        def add_node_recursive(node_db, parent_tree_node=None):
+            """Agrega un nodo y sus hijos recursivamente al árbol"""
+            if parent_tree_node is None:
+                # Es el nodo raíz, usar file_tree.root
+                tree_node = file_tree.root
+                logger.info(f"Procesando nodo raíz con {len(node_db.rules.all())} reglas")
             else:
-                # Agregar nodo al árbol
-                parent = TreeNode.query.get(node.parent_id)
-                if parent:
-                    new_node = file_tree.add_node(parent.path, node.name, node.path, node.node_type)
-                    # Cargar reglas para este nodo
-                    if node.id in rules_by_node:
-                        for rule in rules_by_node[node.id]:
-                            new_node.add_rule(
-                                rule_type=rule.rule_type,
-                                pattern=rule.pattern,
-                                priority=rule.priority
-                            )
+                # Crear nuevo nodo en el árbol
+                tree_node = file_tree.add_node(
+                    parent_tree_node.path,
+                    node_db.name,
+                    node_db.path,
+                    node_db.node_type
+                )
+                if tree_node:
+                    logger.info(f"Nodo agregado al árbol: {node_db.name} (path: {node_db.path})")
+                else:
+                    logger.warning(f"No se pudo agregar nodo {node_db.name} al árbol")
+                    return
+            
+            # Cargar reglas para este nodo
+            if node_db.id in rules_by_node:
+                for rule in rules_by_node[node_db.id]:
+                    tree_node.add_rule(
+                        rule_type=rule.rule_type,
+                        pattern=rule.pattern,
+                        priority=rule.priority
+                    )
+                logger.info(f"  → {len(rules_by_node[node_db.id])} reglas cargadas para {node_db.name}")
+            
+            # Procesar hijos
+            children = [n for n in nodes if n.parent_id == node_db.id]
+            for child in children:
+                add_node_recursive(child, tree_node)
+        
+        # Encontrar nodos raíz (sin parent_id) y procesarlos
+        root_nodes = [n for n in nodes if n.parent_id is None]
+        
+        if root_nodes:
+            # Si hay nodos raíz en la BD, procesarlos
+            for root_node in root_nodes:
+                add_node_recursive(root_node, None)
+        
+        logger.info(f"Árbol inicializado con {len(file_tree.get_all_nodes())} nodos en memoria")
     
     # Inicializar organizador con sesión de BD
     file_organizer = FileOrganizer(file_tree, db.session)
@@ -182,6 +208,7 @@ def create_node():
     """Crea un nuevo nodo en el árbol"""
     try:
         data = request.get_json()
+        graph_result = None
         
         # Validar datos requeridos
         if not data.get('name'):
@@ -190,17 +217,45 @@ def create_node():
                 'message': 'El nombre del nodo es requerido'
             }), 400
         
-        if not data.get('path'):
+        # Construir la ruta automáticamente basándose en el padre
+        parent_id = data.get('parent_id')
+        node_path = None
+        
+        if parent_id:
+            # Si tiene padre, construir ruta dentro del padre
+            parent = TreeNode.query.get(parent_id)
+            if not parent:
+                return jsonify({
+                    'success': False,
+                    'message': f'Nodo padre con ID {parent_id} no encontrado'
+                }), 404
+            
+            # Construir ruta: ruta_padre/nombre_hijo
+            node_path = os.path.join(parent.path, data['name'])
+            logger.info(f"Construyendo ruta de hijo: {node_path} (padre: {parent.path})")
+        else:
+            # Si no tiene padre, usar la ruta proporcionada o construir una por defecto
+            if data.get('path'):
+                node_path = data['path']
+            else:
+                # Ruta por defecto basada en la carpeta de organización
+                root_path = os.path.join(os.path.expanduser('~'), 'Desktop', 'Organized')
+                node_path = os.path.join(root_path, data['name'])
+            logger.info(f"Construyendo ruta de nodo raíz: {node_path}")
+        
+        # Verificar que no exista ya un nodo con esa ruta
+        existing_node = TreeNode.query.filter_by(path=node_path).first()
+        if existing_node:
             return jsonify({
                 'success': False,
-                'message': 'La ruta del nodo es requerida'
+                'message': f'Ya existe un nodo con la ruta: {node_path}'
             }), 400
         
         # Crear el nodo en la base de datos
         new_node = TreeNode(
             name=data['name'],
-            path=data['path'],
-            parent_id=data.get('parent_id'),
+            path=node_path,
+            parent_id=parent_id,
             node_type=data.get('node_type', 'folder')
         )
         
@@ -209,22 +264,42 @@ def create_node():
         
         # Crear la carpeta física si no existe
         try:
-            os.makedirs(data['path'], exist_ok=True)
-            logger.info(f"Carpeta creada: {data['path']}")
+            os.makedirs(node_path, exist_ok=True)
+            logger.info(f"Carpeta física creada: {node_path}")
         except Exception as folder_error:
             logger.warning(f"No se pudo crear la carpeta física: {folder_error}")
         
         # Actualizar árbol en memoria
-        if file_tree and data.get('parent_id'):
-            parent = TreeNode.query.get(data['parent_id'])
-            if parent:
-                file_tree.add_node(parent.path, data['name'], data['path'], data.get('node_type', 'folder'))
+        if file_tree:
+            if parent_id:
+                parent = TreeNode.query.get(parent_id)
+                if parent:
+                    file_tree.add_node(parent.path, data['name'], node_path, data.get('node_type', 'folder'))
+                    logger.info(f"Nodo agregado al árbol en memoria como hijo de {parent.name}")
+            else:
+                # Si es nodo raíz, agregarlo directamente
+                logger.info(f"Nodo raíz agregado al árbol en memoria")
         
-        logger.info(f"Nodo creado: {new_node.name} (ID: {new_node.id})")
+        logger.info(f"Nodo creado exitosamente: {new_node.name} (ID: {new_node.id}, Ruta: {node_path})")
+
+        # Analizar relaciones por grafos para sugerir copia/backup usando palabras clave de la nueva carpeta
+        try:
+            graph_base_path = data.get('graph_base_path') or (os.path.dirname(node_path) if os.path.isdir(os.path.dirname(node_path)) else node_path)
+            graph_result = connect_project_folders(
+                base_path=graph_base_path,
+                current_folder=node_path,
+                backup_dir=data.get('graph_backup_dir'),
+                copy_on_confirm=False,
+                create_backup=data.get('graph_create_backup', False)
+            )
+        except Exception as graph_error:
+            logger.warning(f"No se pudo analizar relaciones de grafos para {node_path}: {graph_error}")
+            graph_result = None
         
         return jsonify({
             'success': True,
-            'node': new_node.to_dict(),
+            'node': new_node.to_dict(include_children=False),
+            'graph': graph_result,
             'message': 'Nodo creado exitosamente'
         }), 201
     
@@ -256,14 +331,8 @@ def update_node(node_id):
                 'message': 'Nodo no encontrado'
             }), 404
 
-        # Verificar si es el nodo raíz (no tiene parent_id)
-        if node.parent_id is None:
-            return jsonify({
-                'success': False,
-                'message': 'No se puede editar el nodo raíz'
-            }), 400
-
         data = request.get_json()
+        old_path = node.path
 
         if 'name' in data:
             node.name = data['name']
@@ -279,7 +348,7 @@ def update_node(node_id):
         # Actualizar árbol en memoria
         if file_tree:
             # Buscar el nodo en el árbol y actualizarlo
-            tree_node = file_tree.find_node_by_path(node.path)
+            tree_node = file_tree.find_node_by_path(old_path)
             if tree_node:
                 if 'name' in data:
                     tree_node.name = data['name']
@@ -314,14 +383,14 @@ def delete_node(node_id):
                 'message': 'Nodo no encontrado'
             }), 404
 
-        # Verificar si es el nodo raíz (no tiene parent_id)
-        if node.parent_id is None:
-            return jsonify({
-                'success': False,
-                'message': 'No se puede eliminar el nodo raíz'
-            }), 400
+        def delete_subtree(n):
+            # Eliminar hijos recursivamente para evitar restricciones de FK
+            for child in n.children.all():
+                print(child)
+                delete_subtree(child)
+            db.session.delete(n)
 
-        db.session.delete(node)
+        delete_subtree(node)
         db.session.commit()
 
         return jsonify({
@@ -841,6 +910,73 @@ def preview_organization():
     
     except Exception as e:
         logger.error(f"Error en previsualización: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+
+# ==================== RUTAS DE GRAFOS (RELACIONES DE CARPETAS) ====================
+
+@app.route('/api/graph/connect', methods=['POST'])
+def connect_graph_folders():
+    """
+    Construye relaciones de carpetas mediante grafos y prepara plan de copia/backup.
+    Pensado para que el frontend muestre un toast de confirmación antes de copiar.
+    """
+    try:
+        data = request.get_json() or {}
+        base_path = data.get('base_path') or (MonitorConfig.query.first().watch_folder if MonitorConfig.query.first() else None)
+        current_folder = data.get('current_folder') or base_path
+        backup_dir = data.get('backup_dir')
+        copy_on_confirm = data.get('copy_on_confirm', False)
+        create_backup = data.get('create_backup', False)
+        preferred_related_folder = data.get('preferred_related_folder')
+
+        if not base_path or not current_folder:
+            return jsonify({
+                'success': False,
+                'message': 'base_path y current_folder son requeridos'
+            }), 400
+
+        result = connect_project_folders(
+            base_path=base_path,
+            current_folder=current_folder,
+            backup_dir=backup_dir,
+            copy_on_confirm=copy_on_confirm,
+            create_backup=create_backup,
+            preferred_related_folder=preferred_related_folder
+        )
+
+        return jsonify({
+            'success': True,
+            'result': result
+        }), 200
+    except Exception as e:
+        logger.error(f"Error conectando carpetas por grafos: {e}")
+        return jsonify({
+            'success': False,
+            'message': str(e)
+        }), 500
+
+
+@app.route('/api/tree/relations', methods=['GET'])
+def get_tree_relations():
+    """
+    Calcula relaciones entre nodos del árbol basadas en palabras clave en los nombres.
+    No accede al sistema de archivos; usa únicamente los nombres y rutas almacenadas.
+    """
+    try:
+        nodes = TreeNode.query.all()
+        payload = [{'name': n.name, 'path': n.path} for n in nodes]
+        relations = compute_keyword_relations(payload)
+
+        return jsonify({
+            'success': True,
+            'relations': relations
+        }), 200
+    except Exception as e:
+        logger.error(f"Error obteniendo relaciones de nodos: {e}")
         return jsonify({
             'success': False,
             'message': str(e)

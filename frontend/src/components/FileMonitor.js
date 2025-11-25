@@ -49,6 +49,7 @@ import {
   getMonitorFiles,
   organizeAllFiles,
   getTree,
+  connectProjectFolders,
 } from '../services/api';
 
 const FileMonitor = () => {
@@ -65,6 +66,13 @@ const FileMonitor = () => {
   const [tree, setTree] = useState(null);
   const [confirmationDialog, setConfirmationDialog] = useState(false);
   const [confirmationMessage, setConfirmationMessage] = useState('');
+  const [graphCurrentFolder, setGraphCurrentFolder] = useState('');
+  const [graphLoading, setGraphLoading] = useState(false);
+  const [graphToast, setGraphToast] = useState(null);
+  const [graphPlan, setGraphPlan] = useState([]);
+  const [graphRelated, setGraphRelated] = useState([]);
+  const [graphBackupPath, setGraphBackupPath] = useState(null);
+  const [graphCreateBackup, setGraphCreateBackup] = useState(false);
 
   useEffect(() => {
     loadMonitorData();
@@ -75,6 +83,7 @@ const FileMonitor = () => {
   useEffect(() => {
     if (config) {
       setNewWatchFolder(config.watch_folder);
+      setGraphCurrentFolder(config.watch_folder || '');
       console.log(config);
     }
   }, [config?.id]);
@@ -104,6 +113,48 @@ const FileMonitor = () => {
       setError('Error cargando datos del monitor: ' + err.message);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleAnalyzeRelations = async (copyNow = false) => {
+    try {
+      if (!config?.watch_folder) {
+        setError('Configura primero la carpeta a monitorear para usar los grafos.');
+        return;
+      }
+
+      setGraphLoading(true);
+      const response = await connectProjectFolders({
+        base_path: config.watch_folder,
+        current_folder: graphCurrentFolder || config.watch_folder,
+        copy_on_confirm: copyNow,
+        create_backup: graphCreateBackup && copyNow,
+      });
+
+      if (!response.success) {
+        setError(response.message || 'No se pudo analizar las relaciones de carpetas.');
+        return;
+      }
+
+      const { toast, related_folders, copy_plan, copy_result, backup_path } = response.result;
+      setGraphToast(toast || 'No se encontraron relaciones fuertes entre carpetas.');
+      setGraphPlan(copy_plan || []);
+      setGraphRelated(related_folders || []);
+      setGraphBackupPath(backup_path || null);
+
+      if (copy_result) {
+        const copied = copy_result.copied?.length || 0;
+        const skipped = copy_result.skipped?.length || 0;
+        setSuccess(`Copiado desde carpeta relacionada: ${copied} archivos, ${skipped} omitidos (existentes).`);
+      }
+
+      if (backup_path) {
+        setSuccess((prev) => `${prev ? prev + ' | ' : ''}Backup creado en: ${backup_path}`);
+      }
+    } catch (err) {
+      setError('Error analizando relaciones de carpetas: ' + err.message);
+    } finally {
+      setGraphLoading(false);
     }
   };
 
@@ -403,6 +454,96 @@ const FileMonitor = () => {
                 <strong>Recursivo:</strong> {status?.recursive ? 'Sí' : 'No'}
               </Typography>
             </Box>
+
+            <Divider sx={{ my: 3 }} />
+
+            <Typography variant="h6" gutterBottom>
+              Relaciones de proyecto (grafos)
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              Detecta carpetas relacionadas por palabras clave (backend/frontend, nombre de proyecto, etc.) y copia los archivos útiles sin node_modules, venv ni dependencias pesadas.
+            </Typography>
+
+            <Grid container spacing={2} alignItems="center">
+              <Grid item xs={12} md={8}>
+                <TextField
+                  fullWidth
+                  label="Carpeta actual del proyecto"
+                  value={graphCurrentFolder}
+                  onChange={(e) => setGraphCurrentFolder(e.target.value)}
+                  helperText="Se usará como nodo principal para encontrar coincidencias"
+                />
+              </Grid>
+              <Grid item xs={12} md={4}>
+                <FormControlLabel
+                  control={
+                    <Switch
+                      checked={graphCreateBackup}
+                      onChange={(e) => setGraphCreateBackup(e.target.checked)}
+                    />
+                  }
+                  label="Crear backup ligero"
+                />
+              </Grid>
+            </Grid>
+
+            <Box sx={{ mt: 2, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+              <Button
+                variant="outlined"
+                startIcon={graphLoading ? <CircularProgress size={18} /> : <Warning />}
+                onClick={() => handleAnalyzeRelations(false)}
+                disabled={graphLoading}
+              >
+                Detectar relaciones
+              </Button>
+              <Button
+                variant="contained"
+                startIcon={graphLoading ? <CircularProgress size={18} /> : <FolderOpen />}
+                onClick={() => handleAnalyzeRelations(true)}
+                disabled={graphLoading || !graphCurrentFolder}
+              >
+                Copiar desde carpeta relacionada
+              </Button>
+            </Box>
+
+            {graphToast && (
+              <Alert severity="info" sx={{ mt: 2 }} onClose={() => setGraphToast(null)}>
+                {graphToast}
+              </Alert>
+            )}
+
+            {graphRelated.length > 0 && (
+              <Box sx={{ mt: 2 }}>
+                <Typography variant="body2" sx={{ mb: 1 }}>
+                  Relaciones detectadas:
+                </Typography>
+                <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap' }}>
+                  {graphRelated.slice(0, 5).map((item) => (
+                    <Chip
+                      key={item.folder}
+                      label={`${item.folder} (${item.shared_keywords.join(', ')})`}
+                      color="secondary"
+                      variant="outlined"
+                    />
+                  ))}
+                  {graphRelated.length > 5 && (
+                    <Chip label={`+${graphRelated.length - 5} más`} color="secondary" />
+                  )}
+                </Box>
+              </Box>
+            )}
+
+            {graphPlan.length > 0 && (
+              <Typography variant="body2" color="text.secondary" sx={{ mt: 1 }}>
+                Plan de copia preparado: {graphPlan.length} archivos (se omiten node_modules, venv, __pycache__, .git).
+              </Typography>
+            )}
+
+            {graphBackupPath && (
+              <Alert severity="success" sx={{ mt: 1 }} onClose={() => setGraphBackupPath(null)}>
+                Backup creado en: {graphBackupPath}
+              </Alert>
+            )}
           </Box>
         )}
       </Paper>

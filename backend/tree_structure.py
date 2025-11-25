@@ -146,22 +146,38 @@ class FileOrganizationTree:
         Encuentra el nodo de destino para un archivo basado en las reglas
         Retorna el nodo con la regla de mayor prioridad que coincida
         """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         best_match = None
         best_priority = -1
         
         all_nodes = self.get_all_nodes()
         
         # Normalizar la extensión del archivo (asegurar que tenga el punto)
-        normalized_file_ext = file_extension.lower()
+        normalized_file_ext = file_extension.lower().strip()
         if normalized_file_ext and not normalized_file_ext.startswith('.'):
             normalized_file_ext = '.' + normalized_file_ext
         
+        logger.info(f"🔍 Buscando destino para archivo: {filename}")
+        logger.info(f"   Extensión normalizada: '{normalized_file_ext}'")
+        logger.info(f"   Total de nodos a revisar: {len(all_nodes)}")
+        
+        matches_found = []
+        
         for node in all_nodes:
+            if not node.rules:
+                continue
+                
+            logger.info(f"   📁 Revisando nodo: {node.name} ({len(node.rules)} reglas)")
+            
             for rule in node.rules:
-                if not rule['is_active']:
+                if not rule.get('is_active', True):
+                    logger.info(f"      ⏭️  Regla inactiva: {rule['rule_type']} - {rule['pattern']}")
                     continue
                 
                 match = False
+                match_reason = ""
                 
                 if rule['rule_type'] == 'extension':
                     # Normalizar el patrón de la regla (asegurar que tenga el punto)
@@ -169,17 +185,50 @@ class FileOrganizationTree:
                     if normalized_pattern and not normalized_pattern.startswith('.'):
                         normalized_pattern = '.' + normalized_pattern
                     
+                    logger.info(f"      🔧 Regla extensión: '{rule['pattern']}' → '{normalized_pattern}'")
+                    
                     # Comparar extensiones normalizadas
                     if normalized_file_ext == normalized_pattern:
                         match = True
+                        match_reason = f"extensión '{normalized_file_ext}' coincide con '{normalized_pattern}'"
+                    else:
+                        logger.info(f"         ❌ No coincide: '{normalized_file_ext}' != '{normalized_pattern}'")
                 
                 elif rule['rule_type'] == 'keyword':
-                    if rule['pattern'].lower() in filename.lower():
+                    keyword_pattern = rule['pattern'].lower().strip()
+                    filename_lower = filename.lower()
+                    
+                    logger.info(f"      🔑 Regla keyword: '{rule['pattern']}' → '{keyword_pattern}'")
+                    
+                    if keyword_pattern in filename_lower:
                         match = True
+                        match_reason = f"palabra clave '{keyword_pattern}' encontrada en '{filename}'"
+                    else:
+                        logger.info(f"         ❌ No coincide: '{keyword_pattern}' no está en '{filename_lower}'")
                 
-                if match and rule['priority'] > best_priority:
-                    best_match = node
-                    best_priority = rule['priority']
+                if match:
+                    logger.info(f"      ✅ COINCIDENCIA: {match_reason} (prioridad: {rule['priority']})")
+                    matches_found.append({
+                        'node': node,
+                        'rule': rule,
+                        'priority': rule['priority'],
+                        'reason': match_reason
+                    })
+                    
+                    if rule['priority'] > best_priority:
+                        best_match = node
+                        best_priority = rule['priority']
+                        logger.info(f"      ⭐ Nueva mejor coincidencia: {node.name} (prioridad: {best_priority})")
+        
+        if best_match:
+            logger.info(f"✅ Destino encontrado: {best_match.name} (prioridad: {best_priority})")
+            logger.info(f"   Ruta de destino: {best_match.path}")
+        else:
+            logger.warning(f"❌ No se encontró destino para: {filename}")
+            if matches_found:
+                logger.info(f"   Se encontraron {len(matches_found)} coincidencias pero ninguna fue seleccionada")
+            else:
+                logger.info(f"   No se encontraron coincidencias en ninguna regla")
         
         return best_match
     

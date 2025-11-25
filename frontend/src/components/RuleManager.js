@@ -204,7 +204,7 @@ const RuleManager = () => {
                 <TableCell>Tipo</TableCell>
                 <TableCell>Patrón</TableCell>
                 <TableCell>Prioridad</TableCell>
-                <TableCell>Estado</TableCell>
+                {/* <TableCell>Estado</TableCell> */}
                 <TableCell align="right">Acciones</TableCell>
               </TableRow>
             </TableHead>
@@ -233,13 +233,13 @@ const RuleManager = () => {
                       <code>{rule.pattern}</code>
                     </TableCell>
                     <TableCell>{rule.priority}</TableCell>
-                    <TableCell>
+                    {/* <TableCell>
                       <Switch
                         checked={rule.is_active}
                         onChange={() => handleToggleActive(rule)}
                         size="small"
                       />
-                    </TableCell>
+                    </TableCell> */}
                     <TableCell align="right">
                       <IconButton
                         size="small"
