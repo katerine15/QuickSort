@@ -10,6 +10,8 @@ from file_monitor import FileMonitor
 from config import Config
 import os
 import logging
+from lista import listaDobleEnlace
+from listStructure import Tree as BSTree, Node as BSNode
 from graphStructure import connect_project_folders, compute_keyword_relations
 
 # Configurar logging
@@ -31,6 +33,54 @@ db.init_app(app)
 file_tree = None
 file_organizer = None
 file_monitor = None
+
+
+def _build_linked_list(iterable):
+    """Crea una lista doblemente enlazada desde un iterable."""
+    ll = listaDobleEnlace()
+    for item in iterable:
+        ll.insertar_final(item)
+    return ll
+
+
+def _linked_list_to_pylist(linked):
+    """Convierte una lista doblemente enlazada en lista Python."""
+    result = []
+    current = linked.inicio
+    while current:
+        result.append(current.dato)
+        current = current.siguiente
+    return result
+
+
+def _build_bst(iterable, key=lambda x: x.id):
+    """
+    Crea un árbol binario de búsqueda (usando listStructure.Tree) a partir de un iterable.
+    Almacena tuplas (clave, objeto) para hacer comparaciones seguras.
+    """
+    tree = BSTree()
+    for item in iterable:
+        k = key(item)
+        tree.insert((k, item))
+    return tree
+
+
+def _bst_inorder_to_list(tree):
+    """
+    Convierte el BST en lista Python en orden ascendente de clave.
+    """
+    result = []
+
+    def _inorder(node):
+        if not node:
+            return
+        _inorder(node.left)
+        # node.value es una tupla (clave, objeto)
+        result.append(node.value[1])
+        _inorder(node.right)
+
+    _inorder(tree.root)
+    return result
 
 
 def init_database():
@@ -190,7 +240,9 @@ def get_tree():
 def get_all_nodes():
     """Obtiene todos los nodos del árbol"""
     try:
-        nodes = TreeNode.query.all()
+        nodes_query = TreeNode.query.all()
+        nodes_bst = _build_bst(nodes_query, key=lambda n: n.id or 0)
+        nodes = _bst_inorder_to_list(nodes_bst)
         return jsonify({
             'success': True,
             'nodes': [node.to_dict() for node in nodes]
@@ -413,7 +465,9 @@ def delete_node(node_id):
 def get_rules():
     """Obtiene todas las reglas de organización"""
     try:
-        rules = OrganizationRule.query.all()
+        rules_query = OrganizationRule.query.all()
+        rules_bst = _build_bst(rules_query, key=lambda r: r.id or 0)
+        rules = _bst_inorder_to_list(rules_bst)
         return jsonify({
             'success': True,
             'rules': [rule.to_dict() for rule in rules]
@@ -990,7 +1044,10 @@ def get_logs():
     """Obtiene el historial de logs"""
     try:
         limit = request.args.get('limit', 100, type=int)
-        logs = FileLog.query.order_by(FileLog.timestamp.desc()).limit(limit).all()
+        logs_query = FileLog.query.order_by(FileLog.timestamp.desc()).limit(limit).all()
+        # Para mantener el orden por timestamp descendente, invertimos el orden después de insertar por id.
+        logs_bst = _build_bst(logs_query, key=lambda l: l.id or 0)
+        logs = list(reversed(_bst_inorder_to_list(logs_bst)))
         
         return jsonify({
             'success': True,
