@@ -4,29 +4,9 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Set, Tuple
+from env import IGNORED_DIRECTORIES, IGNORED_FILES
 
 # Directorios y archivos que no se deben copiar en operaciones de backup/copia
-IGNORED_DIRECTORIES = {
-    "node_modules",
-    "venv",
-    ".venv",
-    "env",
-    ".env",
-    "__pycache__",
-    "build",
-    "dist",
-    "docker",
-    ".docker",
-    ".github",
-    ".gitlab",
-    ".next",
-    ".nuxt",
-    "target",
-    ".idea",
-    ".vscode",
-    ".git",
-}
-IGNORED_FILES = {".DS_Store"}
 
 
 class Graph:

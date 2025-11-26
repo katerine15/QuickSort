@@ -1,0 +1,21 @@
+IGNORED_DIRECTORIES = {
+    "node_modules",
+    "venv",
+    ".venv",
+    "env",
+    ".env",
+    "__pycache__",
+    "build",
+    "dist",
+    "docker",
+    ".docker",
+    ".github",
+    ".gitlab",
+    ".next",
+    ".nuxt",
+    "target",
+    ".idea",
+    ".vscode",
+    ".git",
+}
+IGNORED_FILES = {".DS_Store"}

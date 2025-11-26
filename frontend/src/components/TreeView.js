@@ -65,6 +65,10 @@ const TreeView = () => {
     node_type: 'folder',
   });
   const [expandedNodes, setExpandedNodes] = useState(new Set());
+  const getDisplayName = (node) => {
+    if (!node) return '';
+    return node.name === "Root" ? 'Organized (carpeta raiz)' : node.name;
+  };
 
   useEffect(() => {
     loadTree();
@@ -415,11 +419,11 @@ const TreeView = () => {
           
           <Box sx={{ flexGrow: 1 }}>
             <Typography component="span" sx={{ fontWeight: 500 }}>
-              {node.name}
+              {getDisplayName(node)}
             </Typography>
             {parentNode && (
               <Typography variant="caption" sx={{ display: 'block', color: 'text.secondary', ml: 0.5 }}>
-                Hijo de: {parentNode.name}
+                Hijo de: {getDisplayName(parentNode)}
               </Typography>
             )}
           </Box>
